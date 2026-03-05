@@ -1,15 +1,26 @@
 #!/usr/bin/env python3
 
-
 import os
+import math
 import rospy
 from duckietown.dtros import DTROS, NodeType
 from duckietown_msgs.msg import Twist2DStamped
 
 
-# Twist command parameters
-VELOCITY = 0.3  # linear m/s, forward (+)
-OMEGA    = 4.0  # angular rad/s, CCW (+)
+
+AXIS_LENGTH = 0.105          # meter — avstånd mellan hjulen
+WHEEL_RADIUS = 0.035         # meter — hjulradius
+WHEEL_CIRC = WHEEL_RADIUS * 2 * math.pi   # hjulets omkrets i meter
+TICKS_PER_REV = 135          # ticks per varv
+VELOCITY = 0.3               # framåthastighet (m/s)
+DESIRED_THETA = 0.0          # önskad riktning (0 = rakt fram i radianer)
+
+# -------------------------------------------------------
+# PI-regulator för styrning 
+# -------------------------------------------------------
+KP_THETA = 7.0               # proportionell — hur hårt vi styr mot rätt riktning
+KI_THETA = 0.3               # integral — kompenserar konstant drift
+OMEGA_MAX = 4.0              # max vridningshastighet (säkerhetsgräns)
 
 
 class TwistControlNode(DTROS):
@@ -19,16 +30,91 @@ class TwistControlNode(DTROS):
        super(TwistControlNode, self).__init__(node_name=node_name, node_type=NodeType.GENERIC)
        vehicle_name = os.environ['VEHICLE_NAME']
        twist_topic  = f"/{vehicle_name}/car_cmd_switch_node/cmd"
-       self._v     = VELOCITY
-       self._omega = OMEGA
-       self._publisher = rospy.Publisher(twist_topic, Twist2DStamped, queue_size=1)
+       left_enc_topic    = f"/{vehicle_name}/left_wheel_encoder_node/tick"
+       right_enc_topic   = f"/{vehicle_name}/right_wheel_encoder_node/tick"
+       self._ticks_left  = None
+       self._ticks_right = None
 
+       self._theta_error_integral = 0.0          # PI-state
+       self._v     = VELOCITY
+       
+       self._position = [0.0, 0.0, 0.0]          # Odometri — position (x, y, theta)
+       self._publisher = rospy.Publisher(twist_topic, Twist2DStamped, queue_size=1)    # Publisher för körkommandon
+
+       rospy.Subscriber(left_enc_topic,  WheelEncoderStamped, self._cb_left)
+       rospy.Subscriber(right_enc_topic, WheelEncoderStamped, self._cb_right)
+       rospy.loginfo("Rak körning med PI-styrning startad")
+
+   def callback_left(self, data):
+       self._ticks_left = data.data
+
+   def callback_right(self, data):
+       self._ticks_right = data.data
+   
+   def _publish_cmd(self, v, omega):       #  En hjälpfunktion som skickar körkommando till roboten
+      self._publisher.publish(Twist2DStamped(v=v, omega=omega))       
 
    def run(self):
-       rate = rospy.Rate(10)
-       message = Twist2DStamped(v=self._v, omega=self._omega)
+       rate = rospy.Rate(20)
+       dt = 1.0 /20.0    # tidssteg i sekunder
+       prev_ticks_left  = None
+       prev_ticks_right = None
+    
+       rospy.loginfo("Väntar på encoder-data...")
+       while (self._ticks_left is None or self._ticks_right is None) \
+            and not rospy.is_shutdown():
+           rate.sleep() 
+
+       prev_ticks_left  = self._ticks_left
+       prev_ticks_right = self._ticks_right
+       rospy.loginfo("Encoder-data mottagen — startar körning!")
+
        while not rospy.is_shutdown():
-           self._publisher.publish(message)
+           dNl = self._ticks_left  - prev_ticks_left
+           dNr = self._ticks_right - prev_ticks_right
+
+           dl = WHEEL_CIRC * (dNl / TICKS_PER_REV)   # vänster hjul i meter
+           dr = WHEEL_CIRC * (dNr / TICKS_PER_REV)   # höger hjul i meter
+
+           d =  (dl + dr) / 2.0                   # sträcka framåt
+           dtheta = (dr - dl) / AXIS_LENGTH       # svängning i radianer eller förändning i vinkel
+
+            # Midpoint-metoden — noggrannare positionsuppdatering
+           midpoint_theta = self._position[2] + dtheta / 2.0      # Robotens vinkel mitt i rörelsen.
+           self._position[0] += d * math.cos(midpoint_theta)      # Robotens x-position uppdateras.
+           self._position[1] += d * math.sin(midpoint_theta)      # Robotens y-position uppdateras.
+           self._position[2] += dtheta                            # Robotens rotation uppdateras
+
+           prev_ticks_left  = self._ticks_left
+           prev_ticks_right = self._ticks_right
+ 
+
+           #   PI-STYRNING — håll roboten rakt (riktning robot ska ha - robots nuvarnde vinkel)
+           theta_error = DESIRED_THETA - self._position[2]
+
+           #  Normalisera felet till intervallet [-pi, pi]
+           while theta_error > math.pi: 
+               theta_error -= 2 * math.pi
+
+           while theta_error < -math.pi:
+               theta_error += 2 * math.pi
+
+           self._theta_error_integral += theta_error * dt   # uppdatera integralen (I-delen)
+           
+           # PI-regulator      (omega = P-del + I-del)
+           omega = KP_THETA * theta_error + KI_THETA * self._theta_error_integral
+           omega = max(-OMEGA_MAX, min(OMEGA_MAX, omega))     # roboten ska inte vrider sig för snabbt
+
+
+           self._publish_cmd(v=VELOCITY, omega=omega)       # skicka kommando till roboten
+
+           rospy.loginfo_throttle(
+                1.0,  # en gång per sec
+                f"Pos: x={self._position[0]:.3f}m  y={self._position[1]:.3f}m  "
+                f"theta={math.degrees(self._position[2]):.1f}°  "
+                f"fel={math.degrees(theta_error):.1f}°  omega={omega:.3f}"
+            )
+           
            rate.sleep()
 
 
