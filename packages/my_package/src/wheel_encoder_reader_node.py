@@ -15,8 +15,18 @@ class WheelEncoderReaderNode(DTROS):
        self._vehicle_name = os.environ['VEHICLE_NAME']
        self._left_encoder_topic = f"/{self._vehicle_name}/left_wheel_encoder_node/tick"
        self._right_encoder_topic = f"/{self._vehicle_name}/right_wheel_encoder_node/tick"
-       self._ticks_left = 0
-       self._ticks_right = 0
+       
+       self._ticks_left = None
+       self._ticks_right = None
+       self._last_tricks_left = None        # Räkna antal meddelanden
+       self._last_tricks_right = None
+
+       self._left_msg_count = 0
+       self._right_msg_count = 0
+
+       rospy.loginfo(f"Lyssnar på vänstar encoder: {self._left_encoder_topic}")
+       rospy.loginfo(f"Lyssnar på höger encoder : {self._right_encoder_topic}")
+
        self.sub_left = rospy.Subscriber(
            self._left_encoder_topic,
            WheelEncoderStamped,
@@ -29,18 +39,40 @@ class WheelEncoderReaderNode(DTROS):
        )
 
    def callback_left(self, data):
-       rospy.loginfo_once(f"Left encoder resolution: {data.resolution}")
-       rospy.loginfo_once(f"Left encoder type: {data.type}")
-       self._ticks_left = data.data
+       self._left_msg_count += 1
+       if self._left_msg_count ==1:
+           rospy.loginfo(f"Vänter encoder aktiv! Resolution : {data.resolution} ticks /varv")
+       self._last_tricks_left = self._ticks_left
+       self._ticks_left = data.ticks
+
+       if self._last_tricks_left is not None:
+           delta = self._ticks_left- self._last_tricks_left
+           if delta !=0:
+               rospy.loginfo(f"Vänster hjul: {self._ticks_left} tick (andring: {delta:+d})")     # d= heltal, + visa alltid tecknet
+
+      # rospy.loginfo_once(f"Left encoder resolution: {data.resolution}")
+     #  rospy.loginfo_once(f"Left encoder type: {data.type}")
+       #self._ticks_left = data.data
 
    def callback_right(self, data):
-       rospy.loginfo_once(f"Right encoder resolution: {data.resolution}")
-       rospy.loginfo_once(f"Right encoder type: {data.type}")
-       self._ticks_right = data.data
+       self._right_msg_count +=1
+       if self._right_msg_count ==1:
+           rospy.loginfo(f"Höger encoder aktiv! Resolution: {data.resolution} ticks /varv ")
+       self._last_tricks_right = self._ticks_right
+       self._ticks_right = data.ticks
+
+       if self._last_tricks_right is not None:
+           delta = self._ticks_right - self._last_tricks_right
+           if delta != 0:
+               rospy.loginfo(f" Höger hjul : {self._ticks_right} ticks (andring: {delta : +d})")
+
+       #rospy.loginfo_once(f"Right encoder resolution: {data.resolution}")
+       #rospy.loginfo_once(f"Right encoder type: {data.type}")
+       #self._ticks_right = data.data
 
    def run(self):
-       rate = rospy.Rate(20)
-       while not rospy.is_shutdown():
+       rate = rospy.Rate(2)
+       while not rospy.is_shutdown(): 
            if self._ticks_left is not None and self._ticks_right is not None:
                msg = (
                    f"Wheel encoder ticks [LEFT, RIGHT]: "
