@@ -15,8 +15,8 @@ class WheelEncoderReaderNode(DTROS):
        self._vehicle_name = os.environ['VEHICLE_NAME']
        self._left_encoder_topic = f"/{self._vehicle_name}/left_wheel_encoder_node/tick"
        self._right_encoder_topic = f"/{self._vehicle_name}/right_wheel_encoder_node/tick"
-       self._ticks_left = None
-       self._ticks_right = None
+       self._ticks_left = 0
+       self._ticks_right = 0
        self.sub_left = rospy.Subscriber(
            self._left_encoder_topic,
            WheelEncoderStamped,

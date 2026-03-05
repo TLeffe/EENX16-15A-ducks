@@ -11,8 +11,8 @@ class CommandInterpreterNode(DTROS):
    def __init__(self, node_name):
        super(CommandInterpreterNode, self).__init__(node_name=node_name, node_type=NodeType.COMMUNICATION)
        self._vehicle_name = os.environ['VEHICLE_NAME']
-       self._publisher = rospy.Publisher('chatter', String, queue_size=10)
-
+       self._publisher = rospy.Publisher('command') #ut topic
+       self.sub = rospy.Subscriber('incoming_data') #in topic
 
    def run(self):
        rate = rospy.Rate(1)  # 1 Hz

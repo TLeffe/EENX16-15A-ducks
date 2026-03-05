@@ -48,7 +48,7 @@ class WheelControlNode(DTROS):
            rate.sleep()
            counter +=1    # räknar
            if counter % 100 ==0 :       #När counter är delbart med 100
-               rospy.loginf(f"Fortfarande i rörelse: Vänster={self._vel_left:.2f}, Höger={self._vel_right:.2f} ")
+               rospy.loginfo(f"Fortfarande i rörelse: Vänster={self._vel_left:.2f}, Höger={self._vel_right:.2f} ")
                
                counter = 0    #Så den börjar räkna om igen mot nästa 100.
            rate.sleep()
