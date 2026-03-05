@@ -4,7 +4,7 @@ import os
 import math
 import rospy
 from duckietown.dtros import DTROS, NodeType
-from duckietown_msgs.msg import Twist2DStamped
+from duckietown_msgs.msg import Twist2DStamped , WheelEncoderStamped
 
 
 
