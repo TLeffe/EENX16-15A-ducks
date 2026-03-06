@@ -43,7 +43,7 @@ class WheelEncoderReaderNode(DTROS):
        if self._left_msg_count ==1:
            rospy.loginfo(f"Vänter encoder aktiv! Resolution : {data.resolution} ticks /varv")
        self._last_tricks_left = self._ticks_left
-       self._ticks_left = data.ticks
+       self._ticks_left = data.data
 
        if self._last_tricks_left is not None:
            delta = self._ticks_left- self._last_tricks_left
@@ -59,12 +59,12 @@ class WheelEncoderReaderNode(DTROS):
        if self._right_msg_count ==1:
            rospy.loginfo(f"Höger encoder aktiv! Resolution: {data.resolution} ticks /varv ")
        self._last_tricks_right = self._ticks_right
-       self._ticks_right = data.ticks
+       self._ticks_right = data.data
 
        if self._last_tricks_right is not None:
            delta = self._ticks_right - self._last_tricks_right
            if delta != 0:
-               rospy.loginfo(f" Höger hjul : {self._ticks_right} ticks (andring: {delta : +d})")
+               rospy.loginfo(f" Höger hjul : {self._ticks_right} ticks (andring: {delta:+d})")
 
        #rospy.loginfo_once(f"Right encoder resolution: {data.resolution}")
        #rospy.loginfo_once(f"Right encoder type: {data.type}")
