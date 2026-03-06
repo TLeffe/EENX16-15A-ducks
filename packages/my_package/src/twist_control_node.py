@@ -38,7 +38,7 @@ class TwistControlNode(DTROS):
         self._v     = VELOCITY
        
         self._position = [0.0, 0.0, 0.0]          # Odometri — position (x, y, theta)
-        self._publisher = rospy.Publisher(twist_topic, Twist2DStamped, queue_size=1)    # Publisher för körkommandon
+        self._publisher = rospy.Publisher(self.twist_topic, Twist2DStamped, queue_size=1)    # Publisher för körkommandon
 
         self.sub_left = rospy.Subscriber(self.left_enc_topic,  WheelEncoderStamped, self.callback_left)
         self.sub_right = rospy.Subscriber(self.right_enc_topic, WheelEncoderStamped, self.callback_right)
