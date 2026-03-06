@@ -59,9 +59,9 @@ class TwistControlNode(DTROS):
         prev_ticks_left  = None
         prev_ticks_right = None
         rospy.loginfo("AAAAAAAAAAAAAAAAAAAAVäntar på encoder-data...")
-        while (self._ticks_left is None or self._ticks_right is None) \ 
+        while (self._ticks_left is None or self._ticks_right is None) \
             and not rospy.is_shutdown():
-               rate.sleep() 
+            rate.sleep() 
 
         prev_ticks_left  = self._ticks_left
         prev_ticks_right = self._ticks_right
