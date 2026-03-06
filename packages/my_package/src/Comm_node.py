@@ -27,8 +27,11 @@ class Comm(DTROS):
                 rospy.loginfo(f"hearing:'{message}'") #skickar vad vi tar emot i terminalen, debugging
                 #todo, parse vad vi vill höra från meddelandet.
                 start_of_relevance = message.find(self._vehicle_name) #find start string of relevant data  determined with the bot name
-                end_of_relevance = message.find(nd , self._vehicle_name) # find 
-                message = message[start_of_relevance,end_of_relevance]
+                rospy.loginfo(f"start: '{start_of_relevance}'")
+                end_of_relevance = message.find("nd", start_of_relevance) # find end of string with nd as marker
+                rospy.loginfo(f"end: '{end_of_relevance}'")
+                rospy.loginfo(f"star: '{start_of_relevance}' end: {end_of_relevance}")
+                message = message[start_of_relevance:end_of_relevance]
                 rospy.loginfo(f"hearing again:'{message}'")
                 self._publisher.publish(message) # publiserar på topic incoming_data
                 rate.sleep()
