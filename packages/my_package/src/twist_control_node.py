@@ -18,8 +18,8 @@ DESIRED_THETA = 0.0          # önskad riktning (0 = rakt fram i radianer)
 # -------------------------------------------------------
 # PI-regulator för styrning 
 # -------------------------------------------------------
-KP_THETA = 7.0               # proportionell — hur hårt vi styr mot rätt riktning
-KI_THETA = 0.3               # integral — kompenserar konstant drift
+KP_THETA = 10.0               # proportionell — hur hårt vi styr mot rätt riktning
+KI_THETA = 0.1               # integral — kompenserar konstant drift
 OMEGA_MAX = 4.0              # max vridningshastighet (säkerhetsgräns)
 
 
@@ -97,6 +97,7 @@ class TwistControlNode(DTROS):
                theta_error += 2 * math.pi
 
             self._theta_error_integral += theta_error * dt   # uppdatera integralen (I-delen)
+            self._theta_error_integral = max(-1.0, min(1.0, self._theta_error_integral))
            
             # PI-regulator      (omega = P-del + I-del)
             omega = KP_THETA * theta_error + KI_THETA * self._theta_error_integral
@@ -116,9 +117,13 @@ class TwistControlNode(DTROS):
 
 
     def on_shutdown(self):
-        stop = Twist2DStamped(v=0.0, omega=0.0)
-        self._publisher.publish(stop)
-
+        rospy.loginfo("Stoppar Roboten")
+        try:
+            stop = Twist2DStamped(v=0.0, omega=0.0)
+            self._publisher.publish(stop)
+            rospy.sleep(0.5)
+        except:
+            pass
 
 if __name__ == '__main__':
     node = TwistControlNode(node_name='twist_control_node')
