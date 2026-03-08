@@ -5,6 +5,7 @@ import math
 import rospy
 from duckietown.dtros import DTROS, NodeType
 from duckietown_msgs.msg import Twist2DStamped , WheelEncoderStamped
+from std_msgs.msg import List
 
 
 
@@ -32,6 +33,7 @@ class TwistControlNode(DTROS):
         self.twist_topic = f"/{self.vehicle_name}/car_cmd_switch_node/cmd"
         self.left_enc_topic = f"/{self.vehicle_name}/left_wheel_encoder_driver_node/tick"
         self.right_enc_topic = f"/{self.vehicle_name}/right_wheel_encoder_driver_node/tick"
+        self.instruction_topic = f"/{self.vehicle_name}/Comm_node/instructions"
         self._ticks_left  = None
         self._ticks_right = None
         self._theta_error_integral = 0.0          # PI-state
@@ -39,10 +41,12 @@ class TwistControlNode(DTROS):
        
         self._position = [0.0, 0.0, 0.0]          # Odometri — position (x, y, theta)
         self._publisher = rospy.Publisher(self.twist_topic, Twist2DStamped, queue_size=1)    # Publisher för körkommandon
-
+        self.sub_instructions = rospy.Subscriber(self.instruction_topic, List, self.callback_comm)
         self.sub_left = rospy.Subscriber(self.left_enc_topic,  WheelEncoderStamped, self.callback_left)
         self.sub_right = rospy.Subscriber(self.right_enc_topic, WheelEncoderStamped, self.callback_right)
         rospy.loginfo("Rak körning med PI-styrning startad")
+    def callback_comm(self,data):
+        self.instruction = data.data
 
     def callback_left(self, data):
         self._ticks_left = data.data
