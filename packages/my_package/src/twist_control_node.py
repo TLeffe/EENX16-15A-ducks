@@ -18,8 +18,8 @@ DESIRED_THETA = 0.0          # önskad riktning (0 = rakt fram i radianer)
 # -------------------------------------------------------
 # PI-regulator för styrning 
 # -------------------------------------------------------
-KP_THETA = 10.0               # proportionell — hur hårt vi styr mot rätt riktning
-KI_THETA = 0.1               # integral — kompenserar konstant drift
+KP_THETA = 5.0               # proportionell — hur hårt vi styr mot rätt riktning
+KI_THETA = 0.2             # integral — kompenserar konstant drift
 OMEGA_MAX = 4.0              # max vridningshastighet (säkerhetsgräns)
 
 
@@ -54,10 +54,10 @@ class TwistControlNode(DTROS):
        self._publisher.publish(Twist2DStamped(v=v, omega=omega))       
 
     def run(self):
-        rate = rospy.Rate(20)
-        dt = 1.0 /20.0    # tidssteg i sekunder
-        prev_ticks_left  = 0
-        prev_ticks_right = 0
+        rate = rospy.Rate(50)
+        dt = 1.0 /50.0    # tidssteg i sekunder
+        prev_ticks_left  = None
+        prev_ticks_right = None
         rospy.loginfo("Väntar på encoder-data...")
         while (self._ticks_left is None or self._ticks_right is None) and not rospy.is_shutdown():
             rate.sleep() 
@@ -97,7 +97,7 @@ class TwistControlNode(DTROS):
                theta_error += 2 * math.pi
 
             self._theta_error_integral += theta_error * dt   # uppdatera integralen (I-delen)
-            self._theta_error_integral = max(-1.0, min(1.0, self._theta_error_integral))
+            #self._theta_error_integral = max(-1.0, min(1.0, self._theta_error_integral))
            
             # PI-regulator      (omega = P-del + I-del)
             omega = KP_THETA * theta_error + KI_THETA * self._theta_error_integral
@@ -105,12 +105,13 @@ class TwistControlNode(DTROS):
 
 
             self._publish_cmd(v=VELOCITY, omega=omega)       # skicka kommando till roboten
-            rospy.loginfo(f"vänster tick{self._ticks_left}")
+            rospy.loginfo(f" Skillanden {self._ticks_left - self._ticks_right}")
             rospy.loginfo_throttle(
                 1.0,  # en gång per sec
                 f"Pos: x={self._position[0]:.3f}m  y={self._position[1]:.3f}m  "
                 f"theta={math.degrees(self._position[2]):.1f}°  "
                 f"fel={math.degrees(theta_error):.1f}°  omega={omega:.3f}"
+               # f"skillnaden{self._ticks_left - self._ticks_right}"
                 )
         
             rate.sleep()
@@ -118,10 +119,12 @@ class TwistControlNode(DTROS):
 
     def on_shutdown(self):
         rospy.loginfo("Stoppar Roboten")
+        # stop = Twist2DStamped(v=0.0, omega=0.0)
+        # self._publisher.publish(stop)
         try:
             stop = Twist2DStamped(v=0.0, omega=0.0)
             self._publisher.publish(stop)
-            rospy.sleep(0.5)
+            #rospy.sleep(0.5)
         except:
             pass
 
