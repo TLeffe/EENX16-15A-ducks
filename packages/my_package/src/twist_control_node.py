@@ -30,10 +30,10 @@ class TwistControlNode(DTROS):
         super(TwistControlNode, self).__init__(node_name=node_name, node_type=NodeType.GENERIC)
         self.vehicle_name = os.environ['VEHICLE_NAME']
         self.twist_topic = f"/{self.vehicle_name}/car_cmd_switch_node/cmd"
-        self.left_enc_topic = f"/{self.vehicle_name}/left_wheel_encoder_node/tick"
-        self.right_enc_topic = f"/{self.vehicle_name}/right_wheel_encoder_node/tick"
-        self._ticks_left  = 0
-        self._ticks_right = 0
+        self.left_enc_topic = f"/{self.vehicle_name}/left_wheel_encoder_driver_node/tick"
+        self.right_enc_topic = f"/{self.vehicle_name}/right_wheel_encoder_driver_node/tick"
+        self._ticks_left  = None
+        self._ticks_right = None
         self._theta_error_integral = 0.0          # PI-state
         self._v     = VELOCITY
        
@@ -56,11 +56,10 @@ class TwistControlNode(DTROS):
     def run(self):
         rate = rospy.Rate(20)
         dt = 1.0 /20.0    # tidssteg i sekunder
-        prev_ticks_left  = None
-        prev_ticks_right = None
-        rospy.loginfo("AAAAAAAAAAAAAAAAAAAAVäntar på encoder-data...")
-        while (self._ticks_left is None or self._ticks_right is None) \
-            and not rospy.is_shutdown():
+        prev_ticks_left  = 0
+        prev_ticks_right = 0
+        rospy.loginfo("Väntar på encoder-data...")
+        while (self._ticks_left is None or self._ticks_right is None) and not rospy.is_shutdown():
             rate.sleep() 
 
         prev_ticks_left  = self._ticks_left
@@ -105,13 +104,13 @@ class TwistControlNode(DTROS):
 
 
             self._publish_cmd(v=VELOCITY, omega=omega)       # skicka kommando till roboten
-
+            rospy.loginfo(f"vänster tick{self._ticks_left}")
             rospy.loginfo_throttle(
                 1.0,  # en gång per sec
                 f"Pos: x={self._position[0]:.3f}m  y={self._position[1]:.3f}m  "
                 f"theta={math.degrees(self._position[2]):.1f}°  "
                 f"fel={math.degrees(theta_error):.1f}°  omega={omega:.3f}"
-            )
+                )
         
             rate.sleep()
 
