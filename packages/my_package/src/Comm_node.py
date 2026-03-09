@@ -3,7 +3,7 @@
 
 import os
 import rospy
-from std_msgs.msg import Float32MultiArray
+from std_msgs.msg import String
 from duckietown.dtros import DTROS, NodeType
 import socket
 PORT = 8765
@@ -14,7 +14,7 @@ class Comm(DTROS):
        super(Comm, self).__init__(node_name=node_name, node_type=NodeType.GENERIC)
        self._vehicle_name = os.environ['VEHICLE_NAME']
        self.instruction_topic = f"/{self._vehicle_name}/Comm_node/instructions"
-       self._publisher = rospy.Publisher('instructions', Float32MultiArray, queue_size=10) # ut topic
+       self._publisher = rospy.Publisher('instructions', String, queue_size=10) # ut topic
 
 
    def run(self):
@@ -33,10 +33,10 @@ class Comm(DTROS):
                     end_of_relevance = message.find("nd", start_of_relevance) # find end of string with nd as marker
                     rospy.loginfo(f"end: '{end_of_relevance}'")
                     rospy.loginfo(f"star: '{start_of_relevance}' end: {end_of_relevance}")
-                    message = message[start_of_relevance:end_of_relevance]
+                    relevant = message[start_of_relevance:end_of_relevance]
                     rospy.loginfo(f"hearing again:'{message}'")
-                    relevant = message.split(",")
-                    del relevant[0]
+                    # relevant = message.split(",")
+                    # del relevant[0]
                     rospy.loginfo(f"hearing again:'{relevant}'")
                     self._publisher.publish(relevant) # publiserar på topic incoming_data
                     rate.sleep()

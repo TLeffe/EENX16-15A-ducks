@@ -5,7 +5,7 @@ import math
 import rospy
 from duckietown.dtros import DTROS, NodeType
 from duckietown_msgs.msg import Twist2DStamped , WheelEncoderStamped
-from std_msgs.msg import Float32MultiArray
+from std_msgs.msg import String
 
 
 
@@ -13,7 +13,7 @@ AXIS_LENGTH = 0.105          # meter — avstånd mellan hjulen
 WHEEL_RADIUS = 0.035         # meter — hjulradius
 WHEEL_CIRC = WHEEL_RADIUS * 2 * math.pi   # hjulets omkrets i meter
 TICKS_PER_REV = 135          # ticks per varv
-VELOCITY = 0.3               # framåthastighet (m/s)
+VELOCITY = 0.0               # framåthastighet (m/s)
 DESIRED_THETA = 0.0          # önskad riktning (0 = rakt fram i radianer)
 
 # -------------------------------------------------------
@@ -33,7 +33,7 @@ class TwistControlNode(DTROS):
         self.twist_topic = f"/{self.vehicle_name}/car_cmd_switch_node/cmd"
         self.left_enc_topic = f"/{self.vehicle_name}/left_wheel_encoder_driver_node/tick"
         self.right_enc_topic = f"/{self.vehicle_name}/right_wheel_encoder_driver_node/tick"
-        # self.instruction_topic = f"/{self.vehicle_name}/Comm_node/instructions"
+        self.instruction_topic = f"/{self.vehicle_name}/Comm_node/instructions"
         self._ticks_left  = None
         self._ticks_right = None
         self._theta_error_integral = 0.0          # PI-state
@@ -41,7 +41,7 @@ class TwistControlNode(DTROS):
        
         self._position = [0.0, 0.0, 0.0]          # Odometri — position (x, y, theta)
         self._publisher = rospy.Publisher(self.twist_topic, Twist2DStamped, queue_size=1)    # Publisher för körkommandon
-        self.sub_instructions = rospy.Subscriber(self.instruction_topic, Float32MultiArray, self.callback_comm)
+        self.sub_instructions = rospy.Subscriber(self.instruction_topic, String, self.callback_comm)
         self.sub_left = rospy.Subscriber(self.left_enc_topic,  WheelEncoderStamped, self.callback_left)
         self.sub_right = rospy.Subscriber(self.right_enc_topic, WheelEncoderStamped, self.callback_right)
         rospy.loginfo("Rak körning med PI-styrning startad")
@@ -57,6 +57,7 @@ class TwistControlNode(DTROS):
     def _publish_cmd(self, v, omega):       #  En hjälpfunktion som skickar körkommando till roboten
        self._publisher.publish(Twist2DStamped(v=v, omega=omega))       
 
+
     def run(self):
         rate = rospy.Rate(30)
         dt = 1.0 /30.0    # tidssteg i sekunder
@@ -71,6 +72,7 @@ class TwistControlNode(DTROS):
         rospy.loginfo("Encoder-data mottagen — startar körning!")
 
         while not rospy.is_shutdown():
+            rospy.loginfo(f"hearing in subscriber:'{self.sub_instructions}'")
             dNl = self._ticks_left  - prev_ticks_left
             dNr = self._ticks_right - prev_ticks_right
 
