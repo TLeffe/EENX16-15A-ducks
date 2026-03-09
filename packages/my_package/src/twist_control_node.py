@@ -29,6 +29,7 @@ class TwistControlNode(DTROS):
 
     def __init__(self, node_name):
         super(TwistControlNode, self).__init__(node_name=node_name, node_type=NodeType.GENERIC)
+        self.instruction = "" #Initiera en tom string för instruktionerna
         self.vehicle_name = os.environ['VEHICLE_NAME']
         self.twist_topic = f"/{self.vehicle_name}/car_cmd_switch_node/cmd"
         self.left_enc_topic = f"/{self.vehicle_name}/left_wheel_encoder_driver_node/tick"
@@ -45,8 +46,10 @@ class TwistControlNode(DTROS):
         self.sub_left = rospy.Subscriber(self.left_enc_topic,  WheelEncoderStamped, self.callback_left)
         self.sub_right = rospy.Subscriber(self.right_enc_topic, WheelEncoderStamped, self.callback_right)
         rospy.loginfo("Rak körning med PI-styrning startad")
-    def callback_comm(self,data):
-        self.instruction = list(data.data)
+    def callback_comm(self,msg):
+        self.instruction = msg.data
+        rospy.loginfo(f"recieved instructions:{self.instruction}")
+
 
     def callback_left(self, data):
         self._ticks_left = data.data
@@ -59,8 +62,8 @@ class TwistControlNode(DTROS):
 
 
     def run(self):
-        rate = rospy.Rate(30)
-        dt = 1.0 /30.0    # tidssteg i sekunder
+        rate = rospy.Rate(5)
+        dt = 1.0 /5.0    # tidssteg i sekunder
         prev_ticks_left  = None
         prev_ticks_right = None
         rospy.loginfo("Väntar på encoder-data...")
@@ -72,7 +75,8 @@ class TwistControlNode(DTROS):
         rospy.loginfo("Encoder-data mottagen — startar körning!")
 
         while not rospy.is_shutdown():
-            rospy.loginfo(f"hearing in subscriber:'{self.sub_instructions}'")
+
+            rospy.loginfo(f"recieved instructions:{self.instruction}")
             dNl = self._ticks_left  - prev_ticks_left
             dNr = self._ticks_right - prev_ticks_right
 
@@ -113,14 +117,14 @@ class TwistControlNode(DTROS):
 
 
             self._publish_cmd(v=VELOCITY, omega=omega)       # skicka kommando till roboten
-            rospy.loginfo(f" Skillanden {self._ticks_left - self._ticks_right}")
-            rospy.loginfo_throttle(
-                1.0,  # en gång per sec
-                f"Pos: x={self._position[0]:.3f}m  y={self._position[1]:.3f}m  "
-                f"theta={math.degrees(self._position[2]):.1f}°  "
-                f"fel={math.degrees(theta_error):.1f}°  omega={omega:.3f}"
-               # f"skillnaden{self._ticks_left - self._ticks_right}"
-                )
+            # rospy.loginfo(f" Skillanden {self._ticks_left - self._ticks_right}")
+            # rospy.loginfo_throttle(
+            #     1.0,  # en gång per sec
+            #     f"Pos: x={self._position[0]:.3f}m  y={self._position[1]:.3f}m  "
+            #     f"theta={math.degrees(self._position[2]):.1f}°  "
+            #     f"fel={math.degrees(theta_error):.1f}°  omega={omega:.3f}"
+            #    # f"skillnaden{self._ticks_left - self._ticks_right}"
+            #     )
         
             rate.sleep()
 
