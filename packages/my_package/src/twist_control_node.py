@@ -5,7 +5,7 @@ import math
 import rospy
 from duckietown.dtros import DTROS, NodeType
 from duckietown_msgs.msg import Twist2DStamped , WheelEncoderStamped
-from std_msgs.msg import List
+from std_msgs.msg import Float32MultiArray
 
 
 
@@ -41,12 +41,12 @@ class TwistControlNode(DTROS):
        
         self._position = [0.0, 0.0, 0.0]          # Odometri — position (x, y, theta)
         self._publisher = rospy.Publisher(self.twist_topic, Twist2DStamped, queue_size=1)    # Publisher för körkommandon
-        self.sub_instructions = rospy.Subscriber(self.instruction_topic, List, self.callback_comm)
+        self.sub_instructions = rospy.Subscriber(self.instruction_topic, Float32MultiArray, self.callback_comm)
         self.sub_left = rospy.Subscriber(self.left_enc_topic,  WheelEncoderStamped, self.callback_left)
         self.sub_right = rospy.Subscriber(self.right_enc_topic, WheelEncoderStamped, self.callback_right)
         rospy.loginfo("Rak körning med PI-styrning startad")
     def callback_comm(self,data):
-        self.instruction = data.data
+        self.instruction = list(data.data)
 
     def callback_left(self, data):
         self._ticks_left = data.data
