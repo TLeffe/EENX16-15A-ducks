@@ -22,9 +22,13 @@ class Comm(DTROS):
             rate = rospy.Rate(1)  # 10 Hz, how often we check for new messages
             with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as client:
                 client.setsockopt (socket.SOL_SOCKET,socket.SO_REUSEADDR, 1)
+                client.settimeout(1.0) # sätter timeout så inte det ska bli en blockning
                 client.bind(('',PORT))    # Lyssnar på PORT som definerats tidigare.   
                 while not rospy.is_shutdown():
-                    data = client.recv(1024) #begränsar storleken på mottaget paket. 
+                    try:  # kolla om det kommit ny data tills timeout.
+                        data = client.recv(1024) #begränsar storleken på mottaget paket. 
+                    except socket.timeout:
+                        continue
                     message=data.decode()
                     rospy.loginfo(f"hearing:'{message}'") #skickar vad vi tar emot i terminalen, debugging
                     #todo, parse vad vi vill höra från meddelandet.
