@@ -29,7 +29,9 @@ class TwistControlNode(DTROS):
 
     def __init__(self, node_name):
         super(TwistControlNode, self).__init__(node_name=node_name, node_type=NodeType.GENERIC)
-        self.instruction = "" #Initiera en tom string för instruktionerna
+        self.instruction = "" #Initiera en tom string för instruktionerna som tas emot
+        self.prev_instructions = "" #initiera en tom string för för förra instruktionerna mottagna
+        self.current_order_list = [] #tom lista som order förvaras i. 
         self.vehicle_name = os.environ['VEHICLE_NAME']
         self.twist_topic = f"/{self.vehicle_name}/car_cmd_switch_node/cmd"
         self.left_enc_topic = f"/{self.vehicle_name}/left_wheel_encoder_driver_node/tick"
@@ -50,6 +52,15 @@ class TwistControlNode(DTROS):
         self.instruction = msg.data
         rospy.loginfo(f"recieved instructions:{self.instruction}")
 
+    def instruction_parse(self):  # tar hand om inkommande instruktioner, förväntas vara på formen self.vehicle_name,x,y,theta,x1,y1,x2,y2nd 
+        while not rospy.is_shutdown():
+            if self.instruction != self.prev_instructions:
+                self.current_instruction = self.prev_instructions 
+                self.current_order_list = self.current_instruction.split(",") # gör om instruktionerna till en lista. 
+                del self.current_order_list[0]  # ta bort namnet på roboten
+                self._position[0:2] = self.current_order_list[0:2] #uppdatera postion och vinklar
+            else:
+                
 
     def callback_left(self, data):
         self._ticks_left = data.data
