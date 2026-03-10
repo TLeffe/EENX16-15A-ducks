@@ -14,7 +14,7 @@ class Comm(DTROS):
        super(Comm, self).__init__(node_name=node_name, node_type=NodeType.GENERIC)
        self._vehicle_name = os.environ['VEHICLE_NAME']
        self.instruction_topic = f"/{self._vehicle_name}/Comm_node/instructions"
-       self._publisher = rospy.Publisher('instructions', String, queue_size=10) # ut topic
+       self._publisher = rospy.Publisher(self.instruction_topic, String, queue_size=10) # ut topic
 
 
    def run(self):

@@ -15,7 +15,7 @@ WHEEL_CIRC = WHEEL_RADIUS * 2 * math.pi   # hjulets omkrets i meter
 TICKS_PER_REV = 135          # ticks per varv
 VELOCITY = 0.0               # framåthastighet (m/s)
 DESIRED_THETA = 0.0          # önskad riktning (0 = rakt fram i radianer)
-
+Accepted_angle = math.radians(20)
 # -------------------------------------------------------
 # PI-regulator för styrning 
 # -------------------------------------------------------
@@ -71,7 +71,29 @@ class TwistControlNode(DTROS):
     def _publish_cmd(self, v, omega):       #  En hjälpfunktion som skickar körkommando till roboten
        self._publisher.publish(Twist2DStamped(v=v, omega=omega))       
 
+    def check_angle_error(self):
+        theta_error = DESIRED_THETA - self._position[2]
+                #  Normalisera felet till intervallet [-pi, pi]
+        while theta_error > math.pi:   
+            theta_error -= 2 * math.pi
 
+        while theta_error < -math.pi:
+            theta_error += 2 * math.pi
+
+        return theta_error
+    
+    def rotation_to_correct(self):
+        rospy.loginfo(" Kolla vinkelfelet om det är större än 20 grader")
+        while not rospy.is_shutdown():
+            theta_error =  self.check_angle_error()
+
+            if abs(theta_error) < Accepted_angle:
+                break
+            
+            
+
+            pass
+    
     def run(self):
         rate = rospy.Rate(5)
         dt = 1.0 /5.0    # tidssteg i sekunder
