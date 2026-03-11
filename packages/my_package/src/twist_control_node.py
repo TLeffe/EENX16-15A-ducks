@@ -23,6 +23,7 @@ KI_THETA =  0.1           # integral — kompenserar konstant drift
 OMEGA_MAX = 4.0              # max vridningshastighet (säkerhetsgräns)
 KD_THETA= 0.2
 GOAL_THRESHOLD = 0.05       # 5 cm — mål nått
+BASE_SPEED =  0.3
 class TwistControlNode(DTROS):
 
 
@@ -46,6 +47,8 @@ class TwistControlNode(DTROS):
 
         self.position = None                # (x, y, theta) ->>> sätts från Comm-noden vid start
         self.goal_pose = None               # (x, y) —>>> målet vi kör mot
+        self._theta_error_integral = 0.0
+        self._prev_theta_error = 0.0
 
         self._position = [0.0, 0.0, 0.0]          # Odometri — position (x, y, theta)
         self._publisher = rospy.Publisher(self.twist_topic, Twist2DStamped, queue_size=1)    # Publisher för körkommandon
@@ -80,11 +83,11 @@ class TwistControlNode(DTROS):
        self._publisher.publish(Twist2DStamped(v=v, omega=omega))       
 
     def normalize_angle(self,angle):       #  Normalisera felet till intervallet [-pi, pi]
-        while theta_error > math.pi:   
-            theta_error -= 2 * math.pi
+        while angle > math.pi:   
+            angle -= 2 * math.pi
 
-        while theta_error < -math.pi:
-            theta_error += 2 * math.pi
+        while angle < -math.pi:
+            angle += 2 * math.pi
         return angle
     
     def reset_PID(self):             # nollställa PID, anropas denna fkt när roboten ska rotera
@@ -105,11 +108,13 @@ class TwistControlNode(DTROS):
         omega = KP_THETA * theta_error + KI_THETA * self._theta_error_integral + self._derivatan
         omega = max(-OMEGA_MAX, min(OMEGA_MAX, omega))     # roboten ska inte vrider sig för snabbt
 
+        return omega
+
     
     def rotation_to_correct(self, rate, dt):
         rospy.loginfo(
             f"Vinkelfel > 20 grader —>>> roterar pa plats "
-            f"Nuvarande: {math.degrees(self.position[2]):.1f} grader"
+            f"Nuvarande: {math.degrees(self._position[2]):.1f} grader"
             f"Önskar: {math.degrees(self.DESIRED_THETA):.1f} grader"
         )
         self.reset_PID()
@@ -129,9 +134,7 @@ class TwistControlNode(DTROS):
         self.reset_PID()
 
     def straight_forward(self, dt): 
-        """kör framåt med PID mot önskade theta
-        körs bara när vinkelfel < 20 grader. 
-        """
+        #   kör framåt med PID mot önskade theta när vinkelfel < 20 grader.
         theta_error = self.check_angle_error()  
         omega = self.PID_omega(theta_error, dt)
         self._publish_cmd(v=self.VELOCITY, omega= omega)
@@ -165,87 +168,64 @@ class TwistControlNode(DTROS):
 
     def calculate_desired_direction(self):
 
-        dx_g = self.goal_pose[0] - self.position[0]
-        dy_g = self.goal_pose[1] - self.position[1]
+        dx_g = self.goal_pose[0] - self._position[0]
+        dy_g = self.goal_pose[1] - self._position[1]
         dist_goal = math.sqrt(dx_g**2 + dy_g**2)
         
         if dist_goal < 0.001:       # Om roboten redan är vid målet, avsluta funktionen
             return
-        v_x = dx_g/dist_goal
-        v_y = dy_g/dist_goal
-
-        self.VELOCITY = 0.0    #  försätt här ifrån 
-        pass
+        self.DESIRED_THETA = math.atan2(dy_g, dx_g)     # Beräknar önskad vinkel (theta) mot målet
+        self.VELOCITY  = BASE_SPEED
+ 
 
 
     def run(self):
-        rate = rospy.Rate(5)
-        dt = 1.0 /5.0    # tidssteg i sekunder
-        prev_ticks_left  = None
-        prev_ticks_right = None
-        rospy.loginfo("Väntar på encoder-data...")
+        rate = rospy.Rate(20)
+        dt = 1.0 /20.0    # tidssteg i sekunder
+
+
+        rospy.loginfo("Väntar på Startposition from Comm-node.")
+        while self.position is None and not rospy.is_shutdown():
+            self.instruction_parse()
+            rospy.loginfo_throttle(2, "Väntar på init_pose...")
+            rate.sleep()
+        
+        rospy.loginfo("Väntar på encoder data.")
         while (self._ticks_left is None or self._ticks_right is None) and not rospy.is_shutdown():
             rate.sleep() 
 
+        if rospy.is_shutdown():
+            return
+        
         prev_ticks_left  = self._ticks_left
         prev_ticks_right = self._ticks_right
-        rospy.loginfo("Encoder-data mottagen — startar körning!")
+        rospy.loginfo(f"Start -->>> Mal:{self.goal_pose}")
 
         while not rospy.is_shutdown():
             self.instruction_parse()
 
-            rospy.loginfo(f"recieved instructions:{self.instruction}")
-            dNl = self._ticks_left  - prev_ticks_left
-            dNr = self._ticks_right - prev_ticks_right
+            # Uppdaterar odometri
+            prev_ticks_left, prev_ticks_right = self.update_odometry(prev_ticks_left, prev_ticks_right)
 
-            dl = WHEEL_CIRC * (dNl / TICKS_PER_REV)   # vänster hjul i meter
-            dr = WHEEL_CIRC * (dNr / TICKS_PER_REV)   # höger hjul i meter
+            if self.Goal_reached():
+                rospy.loginfo_throttle(2, "Är i önskade position  :)")
+                self._publish_cmd(v=0.0, omega=0.0)
+                rate.sleep()
+                continue
 
-            d =  (dl + dr) / 2.0                   # sträcka framåt
-            dtheta = (dr - dl) / AXIS_LENGTH       # svängning i radianer eller förändning i vinkel
+            self.calculate_desired_direction()       #  Bräkna önskade  riktning 
+            theta_error = self.check_angle_error()    # Kolla vinkelfel och styr
 
-            # Midpoint-metoden — noggrannare positionsuppdatering
-            midpoint_theta = self._position[2] + dtheta / 2.0      # Robotens vinkel mitt i rörelsen.
-            self._position[0] += d * math.cos(midpoint_theta)      # Robotens x-position uppdateras.
-            self._position[1] += d * math.sin(midpoint_theta)      # Robotens y-position uppdateras.
-            self._position[2] += dtheta                            # Robotens rotation uppdateras
+            if abs(theta_error) > Accepted_angle:
+                # Fel > 20 grader — stanna och rotera på plats
+                self._publish_cmd(v=0.0, omega= 0.0)
+                self.rotation_to_correct(rate, dt)
+            else:
+                self.straight_forward(dt)     # Fel < 20 grader — kör rakt med PID
 
-            prev_ticks_left  = self._ticks_left
-            prev_ticks_right = self._ticks_right
-            
+            ###### hur får vi positionen?  vilket topic mocap skickar på?##############################
 
-
-            #   PI-STYRNING — håll roboten rakt (riktning robot ska ha - robots nuvarnde vinkel)
-            theta_error = self.DESIRED_THETA - self._position[2]
-
-                #  Normalisera felet till intervallet [-pi, pi]
-            while theta_error > math.pi:   
-                theta_error -= 2 * math.pi
-
-            while theta_error < -math.pi:
-               theta_error += 2 * math.pi
-            
-            self._prev_theta_error = theta_error
-            self._theta_error_integral += theta_error * dt   # uppdatera integralen (I-delen)
-            self._theta_error_integral = max(-3.0, min(3.0, self._theta_error_integral))
-            self._derivatan = KD_THETA * (theta_error-self._prev_theta_error)/dt
-            # PI-regulator      (omega = P-del + I-del)
-            omega = KP_THETA * theta_error + KI_THETA * self._theta_error_integral + self._derivatan
-            omega = max(-OMEGA_MAX, min(OMEGA_MAX, omega))     # roboten ska inte vrider sig för snabbt
-
-
-            self._publish_cmd(v=self.VELOCITY, omega=omega)       # skicka kommando till roboten
-            # rospy.loginfo(f" Skillanden {self._ticks_left - self._ticks_right}")
-            # rospy.loginfo_throttle(
-            #     1.0,  # en gång per sec
-            #     f"Pos: x={self._position[0]:.3f}m  y={self._position[1]:.3f}m  "
-            #     f"theta={math.degrees(self._position[2]):.1f}°  "
-            #     f"fel={math.degrees(theta_error):.1f}°  omega={omega:.3f}"
-            #    # f"skillnaden{self._ticks_left - self._ticks_right}"
-            #     )
-        
             rate.sleep()
-
 
     def on_shutdown(self):
         rospy.loginfo("Stoppar Roboten")
