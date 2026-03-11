@@ -54,15 +54,15 @@ class TwistControlNode(DTROS):
         self.instruction = msg.data
         rospy.loginfo(f"recieved instructions:{self.instruction}")
 
-    def instruction_parse(self):  # tar hand om inkommande instruktioner, förväntas vara på formen self.vehicle_name,x,y,theta,x1,y1,x2,y2 
+    def instruction_parse(self):  # tar hand om inkommande instruktioner, ska vara string på formen self.vehicle_name,x,y,theta,x1,y1,x2,y2 
         while not rospy.is_shutdown():
             if self.instruction != self.prev_instructions:
-                self.current_instruction = self.prev_instructions 
-                self.current_order_list = self.current_instruction.split(",") # gör om instruktionerna till en lista. 
+                self.prev_instructions = self.instruction
+                self.current_order_list = self.prev_instructions.split(",") # gör om instruktionerna till en lista. 
                 del self.current_order_list[0]  # ta bort namnet på roboten
                 self._position[0:3] = self.current_order_list[0:3] #uppdatera postion och vinklar
-                self.DESIRED_THETA = math.atan((self.current_order_list(0)-self.current_order_list(3))
-                                               /self.current_order_list(1)-self.current_order_list(4))# önskad vinkel
+                self.DESIRED_THETA = math.atan((self.current_order_list[0]-self.current_order_list[3])
+                                               /self.current_order_list[1]-self.current_order_list[4])# beräkning önskadvinkel
             else:
                 break # om inga nya instruktioner på topic, uppdatera inget
 
