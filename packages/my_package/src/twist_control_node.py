@@ -13,8 +13,7 @@ AXIS_LENGTH = 0.105          # meter — avstånd mellan hjulen
 WHEEL_RADIUS = 0.035         # meter — hjulradius
 WHEEL_CIRC = WHEEL_RADIUS * 2 * math.pi   # hjulets omkrets i meter
 TICKS_PER_REV = 135          # ticks per varv
-VELOCITY = 0.0               # framåthastighet (m/s)
-DESIRED_THETA = 0.0          # önskad riktning (0 = rakt fram i radianer)
+
 Accepted_angle = math.radians(20)
 # -------------------------------------------------------
 # PI-regulator för styrning 
@@ -33,14 +32,17 @@ class TwistControlNode(DTROS):
         self.prev_instructions = "" #initiera en tom string för för förra instruktionerna mottagna
         self.current_order_list = [] #tom lista som order förvaras i. 
         self.vehicle_name = os.environ['VEHICLE_NAME']
+        self.instruction_topic = f"/{self.vehicle_name}/Comm_node/instructions"
+
         self.twist_topic = f"/{self.vehicle_name}/car_cmd_switch_node/cmd"
         self.left_enc_topic = f"/{self.vehicle_name}/left_wheel_encoder_driver_node/tick"
         self.right_enc_topic = f"/{self.vehicle_name}/right_wheel_encoder_driver_node/tick"
-        self.instruction_topic = f"/{self.vehicle_name}/Comm_node/instructions"
+        self.VELOCITY = 0.0               # framåthastighet (m/s)
+        self.DESIRED_THETA = 0.0          # önskad riktning (0 = rakt fram i radianer)
         self._ticks_left  = None
         self._ticks_right = None
         self._theta_error_integral = 0.0          # PI-state
-        self._v     = VELOCITY
+        self._v     = self.VELOCITY
        
         self._position = [0.0, 0.0, 0.0]          # Odometri — position (x, y, theta)
         self._publisher = rospy.Publisher(self.twist_topic, Twist2DStamped, queue_size=1)    # Publisher för körkommandon
@@ -52,15 +54,16 @@ class TwistControlNode(DTROS):
         self.instruction = msg.data
         rospy.loginfo(f"recieved instructions:{self.instruction}")
 
-    def instruction_parse(self):  # tar hand om inkommande instruktioner, förväntas vara på formen self.vehicle_name,x,y,theta,x1,y1,x2,y2nd 
+    def instruction_parse(self):  # tar hand om inkommande instruktioner, förväntas vara på formen self.vehicle_name,x,y,theta,x1,y1,x2,y2 
         while not rospy.is_shutdown():
             if self.instruction != self.prev_instructions:
                 self.current_instruction = self.prev_instructions 
                 self.current_order_list = self.current_instruction.split(",") # gör om instruktionerna till en lista. 
                 del self.current_order_list[0]  # ta bort namnet på roboten
-                self._position[0:2] = self.current_order_list[0:2] #uppdatera postion och vinklar
+                self._position[0:3] = self.current_order_list[0:3] #uppdatera postion och vinklar
+                self.DESIRED_THETA = 
             else:
-                
+                break # om inga nya instruktioner på topic, uppdatera inget
 
     def callback_left(self, data):
         self._ticks_left = data.data
@@ -72,7 +75,7 @@ class TwistControlNode(DTROS):
        self._publisher.publish(Twist2DStamped(v=v, omega=omega))       
 
     def check_angle_error(self):
-        theta_error = DESIRED_THETA - self._position[2]
+        theta_error = self.DESIRED_THETA - self._position[2]
                 #  Normalisera felet till intervallet [-pi, pi]
         while theta_error > math.pi:   
             theta_error -= 2 * math.pi
@@ -131,7 +134,7 @@ class TwistControlNode(DTROS):
 
 
             #   PI-STYRNING — håll roboten rakt (riktning robot ska ha - robots nuvarnde vinkel)
-            theta_error = DESIRED_THETA - self._position[2]
+            theta_error = self.DESIRED_THETA - self._position[2]
 
                 #  Normalisera felet till intervallet [-pi, pi]
             while theta_error > math.pi:   
@@ -149,7 +152,7 @@ class TwistControlNode(DTROS):
             omega = max(-OMEGA_MAX, min(OMEGA_MAX, omega))     # roboten ska inte vrider sig för snabbt
 
 
-            self._publish_cmd(v=VELOCITY, omega=omega)       # skicka kommando till roboten
+            self._publish_cmd(v=self.VELOCITY, omega=omega)       # skicka kommando till roboten
             # rospy.loginfo(f" Skillanden {self._ticks_left - self._ticks_right}")
             # rospy.loginfo_throttle(
             #     1.0,  # en gång per sec
