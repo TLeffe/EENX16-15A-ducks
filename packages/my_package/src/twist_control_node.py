@@ -37,7 +37,7 @@ class TwistControlNode(DTROS):
         self.twist_topic = f"/{self.vehicle_name}/car_cmd_switch_node/cmd"
         self.left_enc_topic = f"/{self.vehicle_name}/left_wheel_encoder_driver_node/tick"
         self.right_enc_topic = f"/{self.vehicle_name}/right_wheel_encoder_driver_node/tick"
-        self.VELOCITY = 0.3               # framåthastighet (m/s)
+        self.VELOCITY = 0.2               # framåthastighet (m/s)
         self.DESIRED_THETA = 0.0          # önskad riktning (0 = rakt fram i radianer)
         self._ticks_left  = None
         self._ticks_right = None
@@ -59,10 +59,11 @@ class TwistControlNode(DTROS):
             if self.instruction != self.prev_instructions:
                 self.prev_instructions = self.instruction
                 self.current_order_list = self.prev_instructions.split(",") # gör om instruktionerna till en lista. 
-                del self.current_order_list[0]  # ta bort namnet på roboten
+                del self.current_order_list[0] # ta bort namnet på roboten
+                self.current_order_list = [float(i) for i in self.current_order_list]
                 self._position[0:3] = self.current_order_list[0:3] #uppdatera postion och vinklar
-                self.DESIRED_THETA = math.atan((float(self.current_order_list[0])-float(self.current_order_list[3]))
-                                               /(float(self.current_order_list[1])-float(self.current_order_list[4])))# beräkning önskadvinkel
+                self.DESIRED_THETA = math.atan((self.current_order_list[0]-self.current_order_list[3])
+                                               /(self.current_order_list[1]-self.current_order_list[4]))# beräkning önskadvinkel
             else:
                 break # om inga nya instruktioner på topic, uppdatera inget
 
