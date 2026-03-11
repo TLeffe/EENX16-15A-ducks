@@ -88,9 +88,10 @@ class TwistControlNode(DTROS):
             theta_error =  self.check_angle_error()
 
             if abs(theta_error) < Accepted_angle:
+               
                 break
-            
-            
+            omega = KP_THETA * theta_error
+            omega = max(-OMEGA_MAX, min(OMEGA_MAX, omega))     # roboten ska inte vrider sig för snabbt
 
             pass
     
