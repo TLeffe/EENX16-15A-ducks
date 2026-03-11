@@ -61,8 +61,8 @@ class TwistControlNode(DTROS):
                 self.current_order_list = self.prev_instructions.split(",") # gör om instruktionerna till en lista. 
                 del self.current_order_list[0]  # ta bort namnet på roboten
                 self._position[0:3] = self.current_order_list[0:3] #uppdatera postion och vinklar
-                self.DESIRED_THETA = math.atan((self.current_order_list[0]-self.current_order_list[3])
-                                               /self.current_order_list[1]-self.current_order_list[4])# beräkning önskadvinkel
+                self.DESIRED_THETA = math.atan((float(self.current_order_list[0])-float(self.current_order_list[3]))
+                                               /(float(self.current_order_list[1])-float(self.current_order_list[4])))# beräkning önskadvinkel
             else:
                 break # om inga nya instruktioner på topic, uppdatera inget
 
