@@ -37,7 +37,7 @@ class TwistControlNode(DTROS):
         self.twist_topic = f"/{self.vehicle_name}/car_cmd_switch_node/cmd"
         self.left_enc_topic = f"/{self.vehicle_name}/left_wheel_encoder_driver_node/tick"
         self.right_enc_topic = f"/{self.vehicle_name}/right_wheel_encoder_driver_node/tick"
-        self.VELOCITY = 0.0               # framåthastighet (m/s)
+        self.VELOCITY = 0.3               # framåthastighet (m/s)
         self.DESIRED_THETA = 0.0          # önskad riktning (0 = rakt fram i radianer)
         self._ticks_left  = None
         self._ticks_right = None
@@ -61,7 +61,8 @@ class TwistControlNode(DTROS):
                 self.current_order_list = self.current_instruction.split(",") # gör om instruktionerna till en lista. 
                 del self.current_order_list[0]  # ta bort namnet på roboten
                 self._position[0:3] = self.current_order_list[0:3] #uppdatera postion och vinklar
-                self.DESIRED_THETA = 
+                self.DESIRED_THETA = math.atan((self.current_order_list(0)-self.current_order_list(3))
+                                               /self.current_order_list(1)-self.current_order_list(4))# önskad vinkel
             else:
                 break # om inga nya instruktioner på topic, uppdatera inget
 
@@ -112,6 +113,7 @@ class TwistControlNode(DTROS):
         rospy.loginfo("Encoder-data mottagen — startar körning!")
 
         while not rospy.is_shutdown():
+            self.instruction_parse()
 
             rospy.loginfo(f"recieved instructions:{self.instruction}")
             dNl = self._ticks_left  - prev_ticks_left
