@@ -38,19 +38,19 @@ class TwistControlNode(DTROS):
         self.twist_topic = f"/{self.vehicle_name}/car_cmd_switch_node/cmd"
         self.left_enc_topic = f"/{self.vehicle_name}/left_wheel_encoder_driver_node/tick"
         self.right_enc_topic = f"/{self.vehicle_name}/right_wheel_encoder_driver_node/tick"
-        self.VELOCITY = 0.2               # framåthastighet (m/s)
-        self.DESIRED_THETA = 0.0          # önskad riktning (0 = rakt fram i radianer)
+        self.VELOCITY = 0.3               # framåthastighet (m/s)
+        self.DESIRED_THETA = 0.3          # önskad riktning (0 = rakt fram i radianer)
+        
         self._ticks_left  = None
         self._ticks_right = None
-        self._theta_error_integral = 0.0          # PI-state
+        self._position = [0.0, 0.0, 0.0]          # Odometri — position (x, y, theta)
+
+        self.goal_pose = [1.0, 1.0]               # (x, y) —>>> målet vi kör mot
         self._v     = self.VELOCITY
 
-        self.position = None                # (x, y, theta) ->>> sätts från Comm-noden vid start
-        self.goal_pose = None               # (x, y) —>>> målet vi kör mot
-        self._theta_error_integral = 0.0
+        self._theta_error_integral = 0.0          # PI-state
         self._prev_theta_error = 0.0
 
-        self._position = [0.0, 0.0, 0.0]          # Odometri — position (x, y, theta)
         self._publisher = rospy.Publisher(self.twist_topic, Twist2DStamped, queue_size=1)    # Publisher för körkommandon
         self.sub_instructions = rospy.Subscriber(self.instruction_topic, String, self.callback_comm)
         self.sub_left = rospy.Subscriber(self.left_enc_topic,  WheelEncoderStamped, self.callback_left)
@@ -111,7 +111,7 @@ class TwistControlNode(DTROS):
         return omega
 
     
-    def rotation_to_correct(self, rate, dt):
+    def rotation_to_correct(self, rate, dt, prev_ticks_left, prev_ticks_right):
         rospy.loginfo(
             f"Vinkelfel > 20 grader —>>> roterar pa plats "
             f"Nuvarande: {math.degrees(self._position[2]):.1f} grader"
@@ -119,8 +119,12 @@ class TwistControlNode(DTROS):
         )
         self.reset_PID()
         while not rospy.is_shutdown():
+            prev_ticks_left, prev_ticks_right = self.update_odometry(
+                prev_ticks_left, prev_ticks_right
+            )
             theta_error =  self.check_angle_error()
             if abs(theta_error) < Accepted_angle:
+                rospy.loginfo(f"Vinkle OK!  fel={math.degrees(theta_error):1.f} grader")
                 break
             
             omega = self.PID_omega(theta_error, dt)
@@ -132,6 +136,7 @@ class TwistControlNode(DTROS):
             )
             rate.sleep()
         self.reset_PID()
+        return prev_ticks_left, prev_ticks_right
 
     def straight_forward(self, dt): 
         #   kör framåt med PID mot önskade theta när vinkelfel < 20 grader.
@@ -168,8 +173,9 @@ class TwistControlNode(DTROS):
 
     def calculate_desired_direction(self):
 
-        dx_g = self.goal_pose[0] - self._position[0]
+        dx_g = self.goal_pose[0] - self._position[0]        # beräknar skillnaden mellan målet och nuvarande pos
         dy_g = self.goal_pose[1] - self._position[1]
+
         dist_goal = math.sqrt(dx_g**2 + dy_g**2)
         
         if dist_goal < 0.001:       # Om roboten redan är vid målet, avsluta funktionen
@@ -184,11 +190,11 @@ class TwistControlNode(DTROS):
         dt = 1.0 /20.0    # tidssteg i sekunder
 
 
-        rospy.loginfo("Väntar på Startposition from Comm-node.")
-        while self.position is None and not rospy.is_shutdown():
-            self.instruction_parse()
-            rospy.loginfo_throttle(2, "Väntar på init_pose...")
-            rate.sleep()
+#        rospy.loginfo("Väntar på Startposition from Comm-node.")
+#        while self.position is  None and not rospy.is_shutdown():
+#            self.instruction_parse()
+ #           rospy.loginfo_throttle(2, "Väntar på init_pose...")
+  #          rate.sleep()
         
         rospy.loginfo("Väntar på encoder data.")
         while (self._ticks_left is None or self._ticks_right is None) and not rospy.is_shutdown():
@@ -199,10 +205,11 @@ class TwistControlNode(DTROS):
         
         prev_ticks_left  = self._ticks_left
         prev_ticks_right = self._ticks_right
+        rospy.loginfo(f"Encoder OK! start: V= {prev_ticks_left}  H={prev_ticks_right}")
         rospy.loginfo(f"Start -->>> Mal:{self.goal_pose}")
 
         while not rospy.is_shutdown():
-            self.instruction_parse()
+      #      self.instruction_parse()
 
             # Uppdaterar odometri
             prev_ticks_left, prev_ticks_right = self.update_odometry(prev_ticks_left, prev_ticks_right)
@@ -219,7 +226,7 @@ class TwistControlNode(DTROS):
             if abs(theta_error) > Accepted_angle:
                 # Fel > 20 grader — stanna och rotera på plats
                 self._publish_cmd(v=0.0, omega= 0.0)
-                self.rotation_to_correct(rate, dt)
+                prev_ticks_left,prev_ticks_right = self.rotation_to_correct(rate, dt, prev_ticks_left, prev_ticks_right)
             else:
                 self.straight_forward(dt)     # Fel < 20 grader — kör rakt med PID
 
