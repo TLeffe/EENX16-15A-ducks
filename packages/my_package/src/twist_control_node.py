@@ -14,7 +14,7 @@ WHEEL_RADIUS = 0.035         # meter — hjulradius
 WHEEL_CIRC = WHEEL_RADIUS * 2 * math.pi   # hjulets omkrets i meter
 TICKS_PER_REV = 135          # ticks per varv
 
-Accepted_angle = math.radians(20)
+Accepted_angle = math.radians(30)
 # -------------------------------------------------------
 # PI-regulator för styrning 
 # -------------------------------------------------------
@@ -45,7 +45,7 @@ class TwistControlNode(DTROS):
         self._ticks_right = None
         self._position = [0.0, 0.0, 0.0]          # Odometri — position (x, y, theta)
 
-        self.goal_pose = [1.0, 1.0]               # (x, y) —>>> målet vi kör mot
+        self.goal_pose = [10, 10]               # (x, y) —>>> målet vi kör mot
         self._v     = self.VELOCITY
 
         self._theta_error_integral = 0.0          # PI-state
@@ -68,8 +68,7 @@ class TwistControlNode(DTROS):
                 del self.current_order_list[0] # ta bort namnet på roboten
                 self.current_order_list = [float(i) for i in self.current_order_list]
                 self._position[0:3] = self.current_order_list[0:3] #uppdatera postion och vinklar
-                self.DESIRED_THETA = math.atan((self.current_order_list[0]-self.current_order_list[3])
-                                               /(self.current_order_list[1]-self.current_order_list[4]))# beräkning önskadvinkel
+                self.goal_pose[0:2] = self.current_order_list[3:2]
             else:
                 break # om inga nya instruktioner på topic, uppdatera inget
 
@@ -119,12 +118,13 @@ class TwistControlNode(DTROS):
         )
         self.reset_PID()
         while not rospy.is_shutdown():
+            self.instruction_parse()
             prev_ticks_left, prev_ticks_right = self.update_odometry(
                 prev_ticks_left, prev_ticks_right
             )
             theta_error =  self.check_angle_error()
             if abs(theta_error) < Accepted_angle:
-                rospy.loginfo(f"Vinkle OK!  fel={math.degrees(theta_error):1.f} grader")
+                rospy.loginfo(f"Vinkle OK!  fel={math.degrees(theta_error):1f} grader")
                 break
             
             omega = self.PID_omega(theta_error, dt)
@@ -209,7 +209,7 @@ class TwistControlNode(DTROS):
         rospy.loginfo(f"Start -->>> Mal:{self.goal_pose}")
 
         while not rospy.is_shutdown():
-      #      self.instruction_parse()
+            self.instruction_parse()
 
             # Uppdaterar odometri
             prev_ticks_left, prev_ticks_right = self.update_odometry(prev_ticks_left, prev_ticks_right)
