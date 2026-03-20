@@ -19,9 +19,9 @@ Accepted_angle = math.radians(30)
 # PI-regulator för styrning 
 # -------------------------------------------------------
 KP_THETA = 4               # proportionell — hur hårt vi styr mot rätt riktning
-KI_THETA =  0           # integral — kompenserar konstant drift
+KI_THETA =  0.1          # integral — kompenserar konstant drift
 OMEGA_MAX = 4.0              # max vridningshastighet (säkerhetsgräns)
-KD_THETA= 0
+KD_THETA= 0.2
 GOAL_THRESHOLD = 0.05       # 5 cm — mål nått
 BASE_SPEED =  0.5
 class TwistControlNode(DTROS):
@@ -178,9 +178,10 @@ class TwistControlNode(DTROS):
 
         dist_goal = math.sqrt(dx_g**2 + dy_g**2)
         
-        if dist_goal < 0.001:       # Om roboten redan är vid målet, avsluta funktionen
+        if dist_goal < 0.005:       # Om roboten redan är vid målet, avsluta funktionen
             return
-        self.DESIRED_THETA = math.atan2(dy_g, dx_g)     # Beräknar önskad vinkel (theta) mot målet
+        # self.DESIRED_THETA = math.atan2(dy_g, dx_g)     # Beräknar önskad vinkel (theta) mot målet
+        self.DESIRED_THETA = math.atan2(self.goal_pose[1] - self._position[1],self.goal_pose[0] - self._position[0]  )  
         self.VELOCITY  = BASE_SPEED
  
 
