@@ -19,7 +19,7 @@ class Comm(DTROS):
 
    def run(self):
         while not rospy.is_shutdown():
-            rate = rospy.Rate(1)  # 10 Hz, how often we check for new messages
+            rate = rospy.Rate(6)  # 10 Hz, how often we check for new messages
             with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as client:
                 client.setsockopt (socket.SOL_SOCKET,socket.SO_REUSEADDR, 1)
                 client.settimeout(1.0) # sätter timeout så inte det ska bli en blockning
@@ -31,18 +31,22 @@ class Comm(DTROS):
                         continue
                     message=data.decode()
                     rospy.loginfo(f"hearing:'{message}'") #skickar vad vi tar emot i terminalen, debugging
-                    #todo, parse vad vi vill höra från meddelandet.
-                    start_of_relevance = message.find(self._vehicle_name) #find start string of relevant data  determined with the bot name
-                    rospy.loginfo(f"start: '{start_of_relevance}'")
-                    end_of_relevance = message.find("nd", start_of_relevance) # find end of string with nd as marker
-                    rospy.loginfo(f"end: '{end_of_relevance}'")
-                    rospy.loginfo(f"star: '{start_of_relevance}' end: {end_of_relevance}")
-                    relevant = message[start_of_relevance:end_of_relevance]
-                    rospy.loginfo(f"hearing again:'{message}'")
-                    # relevant = message.split(",")
-                    # del relevant[0]
-                    rospy.loginfo(f"hearing again:'{relevant}'")
-                    self._publisher.publish(relevant) # publiserar på topic incoming_data
+                    if self._vehicle_name in message:
+                        #todo, parse vad vi vill höra från meddelandet.
+                        start_of_relevance = message.find(self._vehicle_name) #find start string of relevant data  determined with the bot name
+                        # rospy.loginfo(f"start: '{start_of_relevance}'")
+                        end_of_relevance = message.find("nd", start_of_relevance) # find end of string with nd as marker
+                        # rospy.loginfo(f"end: '{end_of_relevance}'")
+                        # rospy.loginfo(f"star: '{start_of_relevance}' end: {end_of_relevance}")
+                        relevant = message[start_of_relevance:end_of_relevance]
+                        # rospy.loginfo(f"hearing again:'{message}'")
+                        # relevant = message.split(",")
+                        # del relevant[0]
+                        rospy.loginfo(f"forwarding:'{relevant}'")
+                        self._publisher.publish(relevant) # publiserar på topic incoming_data
+                    else:
+                        rospy.loginfo(f"'{self._vehicle_name}' not found")
+                        continue
                     rate.sleep()
 
 
