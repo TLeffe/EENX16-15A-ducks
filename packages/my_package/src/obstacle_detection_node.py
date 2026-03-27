@@ -38,6 +38,7 @@ class ObstacleDetectionNode(DTROS):
         self.camera_topic = f"/{self.vehicle_name}/camera_node/image/compressed"      #   ROS-topic för att ta emot komprimerade bilder från kameran.
         self.obstacle_topic = f"/{self.vehicle_name}/obstacle_detection_node/obstacle_detected"    # ROS-topic för att publicera om ett hinder upptäckts
         self.desired_theta_topic = f"/{self.vehicle_name}/twist_control_node/desired_theta"          # Lyssnar på twist_control för att få vinkeln mot målet
+        self.current_theta_topic = f"/{self.vehicle_name}/twist_control_node/current_theta"
 
         #----- Tillståndsvariabler
         self.tof_range = float ('inf')     # Senaste avståndet från ToF
@@ -208,7 +209,7 @@ class ObstacleDetectionNode(DTROS):
             if not self.obstacle_in_center():
                 rospy.loginfo(f"FAS 1 klar------>> hindret lämnat mittzon :)")
                 break
-            omega = self.pid_steer(self,self.theta_avoid)
+            omega = self.pid_steer(self.theta_avoid)
             self.twist_pub.publish(Twist2DStamped(v=AVOID_VELOCITY, omega=omega))
             rate.sleep()
 
