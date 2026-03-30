@@ -143,6 +143,7 @@ class TwistControlNode(DTROS):
         theta_error = self.check_angle_error()  
         omega = self.PID_omega(theta_error, dt)
         self._publish_cmd(v=self.VELOCITY, omega= omega)
+        rospy.loginfo(f"nu ska jag publicerat")
 
     def Goal_reached(self):
         """Returnera True om Roboten är inom 5 cm från målet"""
