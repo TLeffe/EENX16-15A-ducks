@@ -219,7 +219,7 @@ class ObstacleDetectionNode(DTROS):
         
         pixel_offset = edge_pixel - (width/ 2.0)   # Beräknar avstånd från bildens mitt till hinderkanten i pixlar
         angle_deg = (pixel_offset/(width/2.0)) * (CAMERA_HFOV /2.0)   # Omvandlar pixelavstånd till en vinkel i grader
-        edge_angle = self.curren_theta + math.radians(angle_deg)     # Beräknar den absolut vinkel i världen
+        edge_angle = self.current_theta + math.radians(angle_deg)     # Beräknar den absolut vinkel i världen
 
         angle_error = self.normalize_angle(edge_angle - self.current_theta)     # Begränsa hur mycket vi svänger från nuvarande riktning
         angle_error = max(-MAX_AVOID_ANGLE, min(MAX_AVOID_ANGLE, angle_error))        # Det är detta som hindrar 180-snurren - max 30 grader åt varje håll
