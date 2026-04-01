@@ -18,12 +18,12 @@ Accepted_angle = math.radians(30)
 # -------------------------------------------------------
 # PI-regulator för styrning 
 # -------------------------------------------------------
-KP_THETA = 4               # proportionell — hur hårt vi styr mot rätt riktning
+KP_THETA = 3               # proportionell — hur hårt vi styr mot rätt riktning
 KI_THETA =  0.1          # integral — kompenserar konstant drift
-OMEGA_MAX = 4.0              # max vridningshastighet (säkerhetsgräns)
+OMEGA_MAX = 0.4              # max vridningshastighet (säkerhetsgräns)
 KD_THETA= 0.2
-GOAL_THRESHOLD = 0.05       # 5 cm — mål nått
-BASE_SPEED =  0.5
+GOAL_THRESHOLD = 0.25       # 5 cm — mål nått
+BASE_SPEED =  0.3
 class TwistControlNode(DTROS):
 
 
@@ -45,14 +45,14 @@ class TwistControlNode(DTROS):
 
         
         
-        self.VELOCITY = 0.8              # framåthastighet (m/s)
-        self.DESIRED_THETA = 0.3          # önskad riktning (0 = rakt fram i radianer)
+        self.VELOCITY = 0.3              # framåthastighet (m/s)
+        self.DESIRED_THETA = 0.0          # önskad riktning (0 = rakt fram i radianer)
         
         self._ticks_left  = None
         self._ticks_right = None
         self._position = [0.0, 0.0, 0.0]          # Odometri — position (x, y, theta)
 
-        self.goal_pose = [4, 0]               # (x, y) —>>> målet vi kör mot
+        self.goal_pose = [0, 0]               # (x, y) —>>> målet vi kör mot
    
 
         self._theta_error_integral = 0.0          # PI-state
@@ -238,6 +238,10 @@ class TwistControlNode(DTROS):
 
         while not rospy.is_shutdown():
             self.instruction_parse()
+            if self.obstacle_active:
+                self._publish_cmd(v=0.0, omega=0.0)
+                rate.sleep()
+                continue
 
             # Uppdaterar odometri
             prev_ticks_left, prev_ticks_right = self.update_odometry(prev_ticks_left, prev_ticks_right)
