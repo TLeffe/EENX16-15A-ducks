@@ -3,9 +3,10 @@
 import os
 import math
 import rospy
+import csv
 from duckietown.dtros import DTROS, NodeType
 from duckietown_msgs.msg import Twist2DStamped , WheelEncoderStamped
-from std_msgs.msg import String, Float32, Bool
+from std_msgs.msg import String
 
 
 
@@ -18,12 +19,12 @@ Accepted_angle = math.radians(30)
 # -------------------------------------------------------
 # PI-regulator för styrning 
 # -------------------------------------------------------
-KP_THETA = 4               # proportionell — hur hårt vi styr mot rätt riktning
-KI_THETA =  0.1          # integral — kompenserar konstant drift
+KP_THETA = 0               # proportionell — hur hårt vi styr mot rätt riktning
+KI_THETA =  0          # integral — kompenserar konstant drift
 OMEGA_MAX = 4.0              # max vridningshastighet (säkerhetsgräns)
-KD_THETA= 0.2
+KD_THETA= 0
 GOAL_THRESHOLD = 0.05       # 5 cm — mål nått
-BASE_SPEED =  0.5
+BASE_SPEED =  0.3
 class TwistControlNode(DTROS):
 
 
@@ -38,51 +39,40 @@ class TwistControlNode(DTROS):
         self.twist_topic = f"/{self.vehicle_name}/car_cmd_switch_node/cmd"
         self.left_enc_topic = f"/{self.vehicle_name}/left_wheel_encoder_driver_node/tick"
         self.right_enc_topic = f"/{self.vehicle_name}/right_wheel_encoder_driver_node/tick"
-        
-        self.desired_theta_topic = f"/{self.vehicle_name}/twist_control_node/desired_theta"
-        self.current_theta_topic = f"/{self.vehicle_name}/twist_control_node/current_theta"
-        self.obstacle_topic      = f"/{self.vehicle_name}/obstacle_detection_node/obstacle_detected"
-
-        
-        
-        self.VELOCITY = 0.8              # framåthastighet (m/s)
-        self.DESIRED_THETA = 0.3          # önskad riktning (0 = rakt fram i radianer)
+        self.VELOCITY = 0.3             # framåthastighet (m/s)
+        self.DESIRED_THETA = 0.0          # önskad riktning (0 = rakt fram i radianer)
         
         self._ticks_left  = None
         self._ticks_right = None
         self._position = [0.0, 0.0, 0.0]          # Odometri — position (x, y, theta)
 
         self.goal_pose = [4, 0]               # (x, y) —>>> målet vi kör mot
-   
+        self._v     = self.VELOCITY
 
         self._theta_error_integral = 0.0          # PI-state
         self._prev_theta_error = 0.0
-        self.obstacle_active = False     #True när obstacle_detection håller på att undvika
 
         self._publisher = rospy.Publisher(self.twist_topic, Twist2DStamped, queue_size=1)    # Publisher för körkommandon
-   
-        self.desired_theta_pub = rospy.Publisher(self.desired_theta_topic, Float32, queue_size=1)
-        self.current_theta_pub = rospy.Publisher(self.current_theta_topic, Float32, queue_size=1)
-
         self.sub_instructions = rospy.Subscriber(self.instruction_topic, String, self.callback_comm)
         self.sub_left = rospy.Subscriber(self.left_enc_topic,  WheelEncoderStamped, self.callback_left)
         self.sub_right = rospy.Subscriber(self.right_enc_topic, WheelEncoderStamped, self.callback_right)
-
-        self.sub_obstacle = rospy.Subscriber(self.obstacle_topic, Bool, self.callback_obstacle)
         rospy.loginfo("Rak körning med PI-styrning startad")
-    
+
+        ##system id methods.
+        self._csv_file = open('/data/angle_log.csv', 'w', newline='')
+        self._csv_writer = csv.writer(self._csv_file)
+        self._csv_writer.writerow(['timestamp', 'desired_theta_deg', 'actual_theta_deg', 'theta_error_deg'])
+
+    def _log_to_csv(self): #logga tid, desired angle, actual angle och theta error. 
+        time=rospy.get_time()
+        self._csv_writer.writerow([time,self.DESIRED_THETA,self._position[2],self.check_angle_error()])
+
+
     def callback_comm(self,msg):
         self.instruction = msg.data
         rospy.loginfo(f"recieved instructions:{self.instruction}")
     
-    
-    def callback_obstacle(self, msg):  # Hanterar hinderstatus
-        self.obstacle_active = msg.data
-        if self.obstacle_active:
-            rospy.loginfo(f"TwistControl: Hinder aktivt ------> pausar körning")
-            self._publish_cmd(v =0.0, omega= 0.0)
-        else:
-            rospy.loginfo(f"TwistControl: Hinder klart ------> återupptar körning")
+
 
     def instruction_parse(self):  # tar hand om inkommande instruktioner, ska vara string på formen self.vehicle_name,x,y,theta,x1,y1,x2,y2 
         while not rospy.is_shutdown():
@@ -167,7 +157,6 @@ class TwistControlNode(DTROS):
         theta_error = self.check_angle_error()  
         omega = self.PID_omega(theta_error, dt)
         self._publish_cmd(v=self.VELOCITY, omega= omega)
-        rospy.loginfo(f"nu ska jag publicerat")
 
     def Goal_reached(self):
         """Returnera True om Roboten är inom 5 cm från målet"""
@@ -182,13 +171,10 @@ class TwistControlNode(DTROS):
 
         dNl = self._ticks_left  - prev_tick_left
         dNr = self._ticks_right - prev_ticks_right
-
         dl = WHEEL_CIRC * (dNl / TICKS_PER_REV)   # vänster hjul i meter
         dr = WHEEL_CIRC * (dNr / TICKS_PER_REV)   # höger hjul i meter
         d =  (dl + dr) / 2.0                   # sträcka framåt
         dtheta = (dr - dl) / AXIS_LENGTH       # svängning i radianer eller förändning i vinkel
-
-
         midpoint_theta  = self._position[2] + dtheta / 2.0
         self._position[0] += d * math.cos(midpoint_theta)
         self._position[1] += d * math.sin(midpoint_theta)
@@ -208,10 +194,8 @@ class TwistControlNode(DTROS):
         # self.DESIRED_THETA = math.atan2(dy_g, dx_g)     # Beräknar önskad vinkel (theta) mot målet
         self.DESIRED_THETA = math.atan2(self.goal_pose[1] - self._position[1],self.goal_pose[0] - self._position[0]  )  
         self.VELOCITY  = BASE_SPEED
+ 
 
-        # publicera desired_theta och current theta varje cykel, då obstacle_detection läser dessa info
-        self.desired_theta_pub.publish(Float32(data=self.DESIRED_THETA))
-        self.current_theta_pub.publish(Float32(data=self._position[2]))
 
     def run(self):
         rate = rospy.Rate(15)
@@ -241,6 +225,7 @@ class TwistControlNode(DTROS):
 
             # Uppdaterar odometri
             prev_ticks_left, prev_ticks_right = self.update_odometry(prev_ticks_left, prev_ticks_right)
+            self._log_to_csv
 
             if self.Goal_reached():
                 rospy.loginfo_throttle(2, "Är i önskade position  :)")
@@ -251,14 +236,13 @@ class TwistControlNode(DTROS):
             self.calculate_desired_direction()       #  Bräkna önskade  riktning 
             theta_error = self.check_angle_error()    # Kolla vinkelfel och styr
 
-            if abs(theta_error) > Accepted_angle:
-                # Fel > 20 grader — stanna och rotera på plats
-                self._publish_cmd(v=0.0, omega= 0.0)
-                prev_ticks_left,prev_ticks_right = self.rotation_to_correct(rate, dt, prev_ticks_left, prev_ticks_right)
-            else:
-                self.straight_forward(dt)     # Fel < 20 grader — kör rakt med PID
-
-            ###### hur får vi positionen?  vilket topic mocap skickar på?##############################
+            # if abs(theta_error) > Accepted_angle:
+            #     # Fel > 20 grader — stanna och rotera på plats
+            #     self._publish_cmd(v=0.0, omega= 0.0)
+            #     prev_ticks_left,prev_ticks_right = self.rotation_to_correct(rate, dt, prev_ticks_left, prev_ticks_right)
+            # else:
+            self.straight_forward(dt)     # Fel < 20 grader — kör rakt med PID
+        
 
             rate.sleep()
 
