@@ -238,6 +238,10 @@ class TwistControlNode(DTROS):
 
         while not rospy.is_shutdown():
             self.instruction_parse()
+            if self.obstacle_active:
+                self._publish_cmd(v=0.0, omega=0.0)
+                rate.sleep()
+                continue
 
             # Uppdaterar odometri
             prev_ticks_left, prev_ticks_right = self.update_odometry(prev_ticks_left, prev_ticks_right)
