@@ -19,10 +19,10 @@ Accepted_angle = math.radians(30)
 # PI-regulator för styrning 
 # -------------------------------------------------------
 KP_THETA = 4               # proportionell — hur hårt vi styr mot rätt riktning
-KI_THETA =  0.1          # integral — kompenserar konstant drift
-OMEGA_MAX = 4.0              # max vridningshastighet (säkerhetsgräns)
+KI_THETA =  0.3          # integral — kompenserar konstant drift
+OMEGA_MAX = 3.0              # max vridningshastighet (säkerhetsgräns)
 KD_THETA= 0.2
-GOAL_THRESHOLD = 0.05       # 5 cm — mål nått
+GOAL_THRESHOLD = 0.10       # 5 cm — mål nått
 BASE_SPEED =  0.5
 class TwistControlNode(DTROS):
 
