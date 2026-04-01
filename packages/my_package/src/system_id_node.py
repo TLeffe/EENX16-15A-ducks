@@ -61,11 +61,12 @@ class TwistControlNode(DTROS):
         ##system id methods.
         self._csv_file = open('/data/angle_log.csv', 'w', newline='')
         self._csv_writer = csv.writer(self._csv_file)
-        self._csv_writer.writerow(['timestamp', 'desired_theta_deg', 'actual_theta_deg', 'theta_error_deg'])
+        self._csv_writer.writerow(['timestamp', 'desired_theta_deg', 'actual_theta_deg'])
 
     def _log_to_csv(self): #logga tid, desired angle, actual angle och theta error. 
+        rospy.loginfo("skriver rad")
         time=rospy.get_time()
-        self._csv_writer.writerow([time,self.DESIRED_THETA,self._position[2],self.check_angle_error()])
+        self._csv_writer.writerow([time,self.DESIRED_THETA,self._position[2]])
 
 
     def callback_comm(self,msg):
@@ -242,7 +243,7 @@ class TwistControlNode(DTROS):
             #     prev_ticks_left,prev_ticks_right = self.rotation_to_correct(rate, dt, prev_ticks_left, prev_ticks_right)
             # else:
             self.straight_forward(dt)     # Fel < 20 grader — kör rakt med PID
-        
+
 
             rate.sleep()
 
@@ -250,6 +251,7 @@ class TwistControlNode(DTROS):
         rospy.loginfo("Stoppar Roboten")
         stop = Twist2DStamped(v=0.0, omega=0.0)
         self._publisher.publish(stop)
+        self._csv_file.close()  
         # try:
         #     stop = Twist2DStamped(v=0.0, omega=0.0)
         #     self._publisher.publish(stop)
