@@ -228,20 +228,11 @@ class ObstacleDetectionNode(DTROS):
             side_text = "HÖGER"
             rospy.loginfo("Mest plats på HÖGER --->>> svänger höger")
         
-<<<<<<< HEAD
+
         pixel_offset = (edge_pixel- width/2.0) /(width/2.0) * (CAMERA_HFOV /2)  # Pixel till vinkel
         angle_error = max(-MAX_AVOID_ANGLE, min(MAX_AVOID_ANGLE, math.radians(pixel_offset)))    # Begränsa vinkel
         theta_avoid = self.normalize_angle(self.current_theta + angle_error)       # Beräkna undvikande riktning
         
-=======
-        pixel_offset = edge_pixel - (width/ 2.0)   # Beräknar avstånd från bildens mitt till hinderkanten i pixlar
-        angle_deg = (pixel_offset/(width/2.0)) * (CAMERA_HFOV /2.0)   # Omvandlar pixelavstånd till en vinkel i grader
-        edge_angle = self.current_theta + math.radians(angle_deg)     # Beräknar den absolut vinkel i världen
-
-        angle_error = self.normalize_angle(edge_angle - self.current_theta)     # Begränsa hur mycket vi svänger från nuvarande riktning
-        angle_error = max(-MAX_AVOID_ANGLE, min(MAX_AVOID_ANGLE, angle_error))        # Det är detta som hindrar 180-snurren - max 30 grader åt varje håll
-        theta_avoid = self.normalize_angle(self.current_theta + angle_error)
->>>>>>> b950715c765f459cd426b76f2fec1d3d1a3f7a5c
         rospy.loginfo_throttle(
             1.0,
             f"Hinder | sida={side_text} | vänster={left_space}px | "
