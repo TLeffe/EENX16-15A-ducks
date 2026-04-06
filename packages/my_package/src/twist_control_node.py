@@ -80,7 +80,7 @@ class TwistControlNode(DTROS):
         self.obstacle_active = msg.data
         if self.obstacle_active:
             rospy.loginfo(f"TwistControl: Hinder aktivt ------> pausar körning")
-            self._publish_cmd(v =0.0, omega= 0.0)
+           # self._publish_cmd(v =0.0, omega= 0.0)
         else:
             rospy.loginfo(f"TwistControl: Hinder klart ------> återupptar körning")
 
