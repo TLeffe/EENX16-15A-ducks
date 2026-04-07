@@ -14,7 +14,7 @@ from std_msgs.msg import Bool,Float32
 TOF_THRESHOLD = 0.45           # meter - triggar kameran om föremål är närmare än detta
 CAMERA_HFOV = 160.0             # grader - kamerans horisontella synfält på Duckiebot
 AVOID_VELOCITY = 0.15            #  hastighet under undvikande
-REVERSE_DURATION = 0.15 / AVOID_VELOCITY     # Tid för att backa 15 cm
+REVERSE_DURATION = 0.20 / AVOID_VELOCITY     # Tid för att backa 20 cm
 
 MAX_AVOID_ANGLE = math.radians(30)       # Max vinkel för undvikande i radianer
 
@@ -29,8 +29,8 @@ MIN_CONTOUR_AREA = 1000      # Minsta area för att räkna som objekt
 ANGLE_THRESHOLD  = math.radians(5)   # Vinkelgräns för att anses vara framme
 SCAN_FRAMES = 4                      # Antal bilder att samla in vid scanning
 SCAN_TIMEOUT = 2.0               # Max tid för scanning i sekunder
-MIN_AVOID_CYCLES = 12             # Minsta antal cykler i undvikande
-WALL_THRESHOLD= 100   # pixlar- både sidor under detta = vägg
+MIN_AVOID_CYCLES = 15             # Minsta antal cykler i undvikande
+WALL_THRESHOLD= 80   # pixlar- både sidor under detta = vägg
 
 IDLE = "IDLE"         # Ingen aktivitet, lyssnar på ToF
 SCANNING = "SCANNING"
@@ -64,6 +64,9 @@ class ObstacleDetectionNode(DTROS):
         self.current_theta = 0.0
         self.theta_avoid = 0.0            # Vinkel att svänga mot för att passera hindret
         
+        self.theta_at_rotation_start = 0.0
+        self.total_rotation_done     = 0.0  # hur många radianer vi roterat totalt
+
         self.state = IDLE            # State machine — börjar i IDLE
         self.scan_results= []        # Lista med undvikande vinklar
         self.scan_start= 0.0
@@ -147,9 +150,7 @@ class ObstacleDetectionNode(DTROS):
         derivative = (error - self._prev_error) / dt
         self._prev_error = error
 
-        self._integral += error * dt
-        self._integral = max(-3.0, min(3.0, self._integral))
-
+        self._integral  = max(-3.0, min(3.0, self._integral + error * dt))
         omega = KP_THETA * error + KI_THETA * self._integral + KD_THETA * derivative
         omega = max(-OMEGA_MAX, min(OMEGA_MAX, omega))
         return omega
@@ -216,14 +217,10 @@ class ObstacleDetectionNode(DTROS):
             f"plats vänster={left_space}  höger={right_space}"
         )
         # Sväng mot den sida som har mest plats
-        object_width = w
-        wall_lik = (left_space <WALL_THRESHOLD and right_space<WALL_THRESHOLD) or (object_width <WALL_THRESHOLD)
-        if wall_lik :
+        if left_space < WALL_THRESHOLD and  right_space < WALL_THRESHOLD:
             rospy.loginfo_throttle(1.0, f"VÄGG  |  vänster={left_space} | höger={right_space} --> backar")
             return True, 0.0, True
-      #  if left_space < WALL_THRESHOLD and  right_space < WALL_THRESHOLD:
-       #     rospy.loginfo_throttle(1.0, f"VÄGG  |  vänster={left_space} | höger={right_space} --> backar")
-        #    return True, 0.0, True
+        
         if left_space > right_space:
             edge_pixel = x
             side_text = "VÄNSTAR"
@@ -278,6 +275,7 @@ class ObstacleDetectionNode(DTROS):
 
                 if ready or (timeout and self.scan_results):       # Om redo eller timeout med resultat
                     self.theta_avoid = float(np.median(self.scan_results))      # Ta median av vinklarna
+                    self.theta_at_rotation_start = self.current_theta
                     self.reset_pid()
                     self.state= ROTATING
                     rospy.loginfo(f"SCANNING --> ROTATING | theta_avoid={math.degrees(self.theta_avoid):.1f}grader")
@@ -289,10 +287,17 @@ class ObstacleDetectionNode(DTROS):
             
             elif self.state == ROTATING:        # Om tillstånd är ROTATING
                 if self.rotate_to(self.theta_avoid):      # Roterar mot undvikande riktning
+                    self.total_rotation_done =self.normalize_angle(self.current_theta -self.theta_at_rotation_start)
                     self.avoid_cycles= 0          # Nollställ cykelräknare
                     self.reset_pid()
                     self.state =AVOIDING
-                    rospy.loginfo("ROTATING --->> AVOIDING")
+                    rospy.loginfo(
+                        f"ROTATING --->>> AVOIDING | "
+                        f"roterat={math.degrees(self.total_rotation_done):.1f}grader"
+                    )
+                else:
+                    rospy.loginfo_throttle(1.0,
+                        f"ROTATING | fel={math.degrees(self.angle_error_to(self.theta_avoid)):.1f} grader")
             elif self.state == AVOIDING:
                 if self.latest_image is None:
                     rate.sleep(); continue
