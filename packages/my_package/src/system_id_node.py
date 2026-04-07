@@ -52,6 +52,8 @@ class TwistControlNode(DTROS):
         self._theta_error_integral = 0.0          # PI-state
         self._prev_theta_error = 0.0
 
+        self.unwrapped_theta = 0
+
         self._publisher = rospy.Publisher(self.twist_topic, Twist2DStamped, queue_size=1)    # Publisher för körkommandon
         self.sub_instructions = rospy.Subscriber(self.instruction_topic, String, self.callback_comm)
         self.sub_left = rospy.Subscriber(self.left_enc_topic,  WheelEncoderStamped, self.callback_left)
@@ -180,6 +182,7 @@ class TwistControlNode(DTROS):
         self._position[0] += d * math.cos(midpoint_theta)
         self._position[1] += d * math.sin(midpoint_theta)
         self._position[2]  = self.normalize_angle(self._position[2] + dtheta)   # Utan normalisering kan roboten få problem när man beräknar rotationsfel
+        self.unwrapped_theta += dtheta
 
         return self._ticks_left, self._ticks_right
 
@@ -199,8 +202,7 @@ class TwistControlNode(DTROS):
 
 
     def run(self):
-        rate = rospy.Rate(25)
-        dt = 1.0 /25.0    # tidssteg i sekunder
+        rate = rospy.Rate(30)
 
         rospy.loginfo("Väntar på encoder data.")
         while (self._ticks_left is None or self._ticks_right is None) and not rospy.is_shutdown():
@@ -211,7 +213,7 @@ class TwistControlNode(DTROS):
         rospy.loginfo(f"Start -->>> Mal:{self.goal_pose}")
         test_omega = 2.0
         start_tid = rospy.get_time()
-        test_tid = 5.0
+        test_tid = 6.0
 
         while not rospy.is_shutdown():
             # Uppdaterar odometri
@@ -219,9 +221,18 @@ class TwistControlNode(DTROS):
             nuvarande_tid = rospy.get_time()
             passerad_tid = nuvarande_tid - start_tid
             
-            if passerad_tid < test_tid:
+            if passerad_tid < 2:
                 v =0.2
                 omega = test_omega
+            elif passerad_tid < 3:
+                v =0.2
+                omega = 0
+            elif passerad_tid < 5:
+                v =0.2
+                omega = -test_omega
+            elif passerad_tid < 6:
+                v =0.2
+                omega = 0
             else:
                 v = 0.0
                 omega = 0
@@ -230,23 +241,10 @@ class TwistControlNode(DTROS):
                 break
 
             self._publish_cmd(v,omega)
-            self._csv_writer.writerow([nuvarande_tid, omega, self._position[2]])
+            self._csv_writer.writerow([nuvarande_tid, omega, self.unwrapped_theta])
             
             rate.sleep()
 
-            
-            # self.calculate_desired_direction()       #  Bräkna önskade  riktning 
-            # theta_error = self.check_angle_error()    # Kolla vinkelfel och styr
-
-            # # if abs(theta_error) > Accepted_angle:
-            # #     # Fel > 20 grader — stanna och rotera på plats
-            # #     self._publish_cmd(v=0.0, omega= 0.0)
-            # #     prev_ticks_left,prev_ticks_right = self.rotation_to_correct(rate, dt, prev_ticks_left, prev_ticks_right)
-            # # else:
-            # self.straight_forward(dt)     # Fel < 20 grader — kör rakt med PID
-
-
-            # rate.sleep()
 
     def on_shutdown(self):
         rospy.loginfo("Stoppar Roboten")
