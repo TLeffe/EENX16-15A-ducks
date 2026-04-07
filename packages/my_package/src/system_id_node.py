@@ -7,7 +7,7 @@ import csv
 from duckietown.dtros import DTROS, NodeType
 from duckietown_msgs.msg import Twist2DStamped , WheelEncoderStamped
 from std_msgs.msg import String
-from std_msgs.msg import Imu
+from sensor_msgs.msg import Imu
 
 
 
@@ -33,7 +33,6 @@ class TwistControlNode(DTROS):
         super(TwistControlNode, self).__init__(node_name=node_name, node_type=NodeType.GENERIC)
         self.instruction = "" #Initiera en tom string för instruktionerna som tas emot
         self.prev_instructions = "" #initiera en tom string för för förra instruktionerna mottagna
-        self.imu_data = "" #initiera en tom string för 
         self.current_order_list = [] #tom lista som order förvaras i. 
         self.vehicle_name = os.environ['VEHICLE_NAME']
         self.instruction_topic = f"/{self.vehicle_name}/Comm_node/instructions"
@@ -76,7 +75,6 @@ class TwistControlNode(DTROS):
         self._csv_writer.writerow([time,self.DESIRED_THETA,self._position[2]])
 
     def callback_imu(self, data):
-        self.imu_data= data.data
         self.latest_imu_gyro_z = data.angular_velocity.z
 
     def callback_comm(self,msg):
@@ -190,12 +188,16 @@ class TwistControlNode(DTROS):
         d =  (dl + dr) / 2.0                   # sträcka framåt
         dtheta = (dr - dl) / AXIS_LENGTH       # svängning i radianer eller förändning i vinkel
         self.calc_omega = dtheta/dt
+        ##filter, kommentera tillbaka om du vill använda både gyro och hjulen
+        # alpha = 0.90 
+        # fused_dtheta = alpha * (self.latest_imu_gyro_z * dt) + (1 - alpha) * dtheta_enc     
+        # midpoint_theta  = self._position[2] + fused_dtheta/2.0
         midpoint_theta  = self._position[2] + dtheta / 2.0
         self._position[0] += d * math.cos(midpoint_theta)
         self._position[1] += d * math.sin(midpoint_theta)
         self._position[2]  = self.normalize_angle(self._position[2] + dtheta)   # Utan normalisering kan roboten få problem när man beräknar rotationsfel
         self.unwrapped_theta += dtheta
-        self.last_time = current_time
+        self.senast_tid = current_time
         return self._ticks_left, self._ticks_right
 
     def calculate_desired_direction(self):
