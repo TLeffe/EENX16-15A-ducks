@@ -32,6 +32,7 @@ class TwistControlNode(DTROS):
         super(TwistControlNode, self).__init__(node_name=node_name, node_type=NodeType.GENERIC)
         self.instruction = "" #Initiera en tom string för instruktionerna som tas emot
         self.prev_instructions = "" #initiera en tom string för för förra instruktionerna mottagna
+        self.imu_data = "" #initiera en tom string för 
         self.current_order_list = [] #tom lista som order förvaras i. 
         self.vehicle_name = os.environ['VEHICLE_NAME']
         self.instruction_topic = f"/{self.vehicle_name}/Comm_node/instructions"
@@ -39,6 +40,7 @@ class TwistControlNode(DTROS):
         self.twist_topic = f"/{self.vehicle_name}/car_cmd_switch_node/cmd"
         self.left_enc_topic = f"/{self.vehicle_name}/left_wheel_encoder_driver_node/tick"
         self.right_enc_topic = f"/{self.vehicle_name}/right_wheel_encoder_driver_node/tick"
+        self.imu_topic = f"/{self.vehicle_name}/imu_node/raw"
         self.VELOCITY = 0.3             # framåthastighet (m/s)
         self.DESIRED_THETA = 0.0          # önskad riktning (0 = rakt fram i radianer)
         
@@ -60,6 +62,7 @@ class TwistControlNode(DTROS):
         self.sub_instructions = rospy.Subscriber(self.instruction_topic, String, self.callback_comm)
         self.sub_left = rospy.Subscriber(self.left_enc_topic,  WheelEncoderStamped, self.callback_left)
         self.sub_right = rospy.Subscriber(self.right_enc_topic, WheelEncoderStamped, self.callback_right)
+        self.imu_read = rospy.Subscriber (self.imu_topic, String, self.callback_imu)
         rospy.loginfo("Rak körning med PI-styrning startad")
 
         ##system id methods.
@@ -72,6 +75,8 @@ class TwistControlNode(DTROS):
         time=rospy.get_time()
         self._csv_writer.writerow([time,self.DESIRED_THETA,self._position[2]])
 
+    def callback_imu(self, data):
+        self.imu_data= data.data
 
     def callback_comm(self,msg):
         self.instruction = msg.data
@@ -221,10 +226,10 @@ class TwistControlNode(DTROS):
         start_tid = rospy.get_time()
 
         while not rospy.is_shutdown():
-            # Uppdaterar odometri
             prev_ticks_left, prev_ticks_right = self.update_odometry(prev_ticks_left, prev_ticks_right)
             nuvarande_tid = rospy.get_time()
             passerad_tid = nuvarande_tid - start_tid
+            rospy.loginfo(f"test färdigt:{self.imu_data}")
             if passerad_tid < 1:
                 v =0.2
                 omega = 0
