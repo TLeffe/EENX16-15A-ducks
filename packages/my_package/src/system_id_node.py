@@ -53,6 +53,8 @@ class TwistControlNode(DTROS):
         self._prev_theta_error = 0.0
 
         self.unwrapped_theta = 0
+        self.senast_tid = rospy.get_time()
+        self.calc_omega = 0
 
         self._publisher = rospy.Publisher(self.twist_topic, Twist2DStamped, queue_size=1)    # Publisher för körkommandon
         self.sub_instructions = rospy.Subscriber(self.instruction_topic, String, self.callback_comm)
@@ -63,7 +65,7 @@ class TwistControlNode(DTROS):
         ##system id methods.
         self._csv_file = open('/data/angle_log.csv', 'w', newline='')
         self._csv_writer = csv.writer(self._csv_file)
-        self._csv_writer.writerow(['timestamp', 'desired_theta_deg', 'actual_theta_deg'])
+        self._csv_writer.writerow(['timestamp', 'desired_theta_deg', 'actual_theta_deg', 'calc_omega'])
 
     def _log_to_csv(self): #logga tid, desired angle, actual angle och theta error. 
         rospy.loginfo("skriver rad")
@@ -171,19 +173,23 @@ class TwistControlNode(DTROS):
         return math.sqrt(dx**2 + dy**2) < GOAL_THRESHOLD
 
     def update_odometry(self, prev_tick_left, prev_ticks_right):
-
+        current_time = rospy.get_time()
+        dt = current_time - self.last_time
+        if dt <= 0:
+            return self._ticks_left, self._ticks_right
         dNl = self._ticks_left  - prev_tick_left
         dNr = self._ticks_right - prev_ticks_right
         dl = WHEEL_CIRC * (dNl / TICKS_PER_REV)   # vänster hjul i meter
         dr = WHEEL_CIRC * (dNr / TICKS_PER_REV)   # höger hjul i meter
         d =  (dl + dr) / 2.0                   # sträcka framåt
         dtheta = (dr - dl) / AXIS_LENGTH       # svängning i radianer eller förändning i vinkel
+        self.calc_omega = dtheta/dt
         midpoint_theta  = self._position[2] + dtheta / 2.0
         self._position[0] += d * math.cos(midpoint_theta)
         self._position[1] += d * math.sin(midpoint_theta)
         self._position[2]  = self.normalize_angle(self._position[2] + dtheta)   # Utan normalisering kan roboten få problem när man beräknar rotationsfel
         self.unwrapped_theta += dtheta
-
+        self.last_time = current_time
         return self._ticks_left, self._ticks_right
 
     def calculate_desired_direction(self):
@@ -202,7 +208,7 @@ class TwistControlNode(DTROS):
 
 
     def run(self):
-        rate = rospy.Rate(30)
+        rate = rospy.Rate(40)
 
         rospy.loginfo("Väntar på encoder data.")
         while (self._ticks_left is None or self._ticks_right is None) and not rospy.is_shutdown():
@@ -213,24 +219,25 @@ class TwistControlNode(DTROS):
         rospy.loginfo(f"Start -->>> Mal:{self.goal_pose}")
         test_omega = 2.0
         start_tid = rospy.get_time()
-        test_tid = 6.0
 
         while not rospy.is_shutdown():
             # Uppdaterar odometri
             prev_ticks_left, prev_ticks_right = self.update_odometry(prev_ticks_left, prev_ticks_right)
             nuvarande_tid = rospy.get_time()
             passerad_tid = nuvarande_tid - start_tid
-            
-            if passerad_tid < 2:
-                v =0.2
-                omega = test_omega
-            elif passerad_tid < 3:
+            if passerad_tid < 1:
                 v =0.2
                 omega = 0
+            elif passerad_tid < 3:
+                v =0.2
+                omega = test_omega
             elif passerad_tid < 5:
                 v =0.2
+                omega = 0
+            elif passerad_tid < 8:
+                v =0.2
                 omega = -test_omega
-            elif passerad_tid < 6:
+            elif passerad_tid < 10:
                 v =0.2
                 omega = 0
             else:
@@ -241,7 +248,10 @@ class TwistControlNode(DTROS):
                 break
 
             self._publish_cmd(v,omega)
-            self._csv_writer.writerow([nuvarande_tid, omega, self.unwrapped_theta])
+            self._csv_writer.writerow([nuvarande_tid, 
+                                       omega, 
+                                       self.unwrapped_theta,
+                                       self.calc_omega])
             
             rate.sleep()
 
