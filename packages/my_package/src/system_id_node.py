@@ -174,7 +174,7 @@ class TwistControlNode(DTROS):
 
     def update_odometry(self, prev_tick_left, prev_ticks_right):
         current_time = rospy.get_time()
-        dt = current_time - self.last_time
+        dt = current_time - self.senast_tid
         if dt <= 0:
             return self._ticks_left, self._ticks_right
         dNl = self._ticks_left  - prev_tick_left
