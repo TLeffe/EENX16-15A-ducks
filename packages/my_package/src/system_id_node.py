@@ -259,6 +259,6 @@ class TwistControlNode(DTROS):
         #     pass
 
 if __name__ == '__main__':
-    node = TwistControlNode(node_name='twist_control_node')
+    node = TwistControlNode(node_name='system_id_node')
     node.run()
     rospy.spin()
