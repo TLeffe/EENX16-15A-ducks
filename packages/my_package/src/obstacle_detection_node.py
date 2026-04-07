@@ -216,9 +216,14 @@ class ObstacleDetectionNode(DTROS):
             f"plats vänster={left_space}  höger={right_space}"
         )
         # Sväng mot den sida som har mest plats
-        if left_space < WALL_THRESHOLD and  right_space < WALL_THRESHOLD:
+        object_width = w
+        wall_lik = (left_space <WALL_THRESHOLD and right_space<WALL_THRESHOLD) or (object_width <WALL_THRESHOLD)
+        if wall_lik :
             rospy.loginfo_throttle(1.0, f"VÄGG  |  vänster={left_space} | höger={right_space} --> backar")
             return True, 0.0, True
+      #  if left_space < WALL_THRESHOLD and  right_space < WALL_THRESHOLD:
+       #     rospy.loginfo_throttle(1.0, f"VÄGG  |  vänster={left_space} | höger={right_space} --> backar")
+        #    return True, 0.0, True
         if left_space > right_space:
             edge_pixel = x
             side_text = "VÄNSTAR"

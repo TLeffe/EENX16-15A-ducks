@@ -45,14 +45,14 @@ class TwistControlNode(DTROS):
 
         
         
-        self.VELOCITY = 0.3              # framåthastighet (m/s)
+        self.VELOCITY = 0.5              # framåthastighet (m/s)
         self.DESIRED_THETA = 0.0          # önskad riktning (0 = rakt fram i radianer)
         
         self._ticks_left  = None
         self._ticks_right = None
         self._position = [0.0, 0.0, 0.0]          # Odometri — position (x, y, theta)
 
-        self.goal_pose = [0, 0]               # (x, y) —>>> målet vi kör mot
+        self.goal_pose = [6, 0]               # (x, y) —>>> målet vi kör mot
    
 
         self._theta_error_integral = 0.0          # PI-state
@@ -80,7 +80,7 @@ class TwistControlNode(DTROS):
         self.obstacle_active = msg.data
         if self.obstacle_active:
             rospy.loginfo(f"TwistControl: Hinder aktivt ------> pausar körning")
-           # self._publish_cmd(v =0.0, omega= 0.0)
+        #    self._publish_cmd(v =0.0, omega= 0.0)
         else:
             rospy.loginfo(f"TwistControl: Hinder klart ------> återupptar körning")
 
@@ -211,7 +211,7 @@ class TwistControlNode(DTROS):
 
         # publicera desired_theta och current theta varje cykel, då obstacle_detection läser dessa info
         self.desired_theta_pub.publish(Float32(data=self.DESIRED_THETA))
-        self.current_theta_pub.publish(Float32(data=self._position[2]))
+       # self.current_theta_pub.publish(Float32(data=self._position[2]))
 
     def run(self):
         rate = rospy.Rate(15)
@@ -238,6 +238,8 @@ class TwistControlNode(DTROS):
 
         while not rospy.is_shutdown():
             self.instruction_parse()
+            prev_ticks_left, prev_ticks_right = self.update_odometry(prev_ticks_left, prev_ticks_right)
+            self.current_theta_pub.publish(Float32(data=self._position[2]))
             if self.obstacle_active:
                 self._publish_cmd(v=0.0, omega=0.0)
                 rate.sleep()

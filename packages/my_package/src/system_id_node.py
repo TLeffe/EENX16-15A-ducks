@@ -226,7 +226,7 @@ class TwistControlNode(DTROS):
 
             # Uppdaterar odometri
             prev_ticks_left, prev_ticks_right = self.update_odometry(prev_ticks_left, prev_ticks_right)
-            self._log_to_csv
+            self._log_to_csv()
 
             if self.Goal_reached():
                 rospy.loginfo_throttle(2, "Är i önskade position  :)")
