@@ -199,53 +199,54 @@ class TwistControlNode(DTROS):
 
 
     def run(self):
-        rate = rospy.Rate(15)
-        dt = 1.0 /15.0    # tidssteg i sekunder
+        rate = rospy.Rate(25)
+        dt = 1.0 /25.0    # tidssteg i sekunder
 
-
-#        rospy.loginfo("Väntar på Startposition from Comm-node.")
-#        while self.position is  None and not rospy.is_shutdown():
-#            self.instruction_parse()
- #           rospy.loginfo_throttle(2, "Väntar på init_pose...")
-  #          rate.sleep()
-        
         rospy.loginfo("Väntar på encoder data.")
         while (self._ticks_left is None or self._ticks_right is None) and not rospy.is_shutdown():
-            rate.sleep() 
-
-        if rospy.is_shutdown():
-            return
-        
+            rate.sleep()         
         prev_ticks_left  = self._ticks_left
         prev_ticks_right = self._ticks_right
         rospy.loginfo(f"Encoder OK! start: V= {prev_ticks_left}  H={prev_ticks_right}")
         rospy.loginfo(f"Start -->>> Mal:{self.goal_pose}")
+        test_omega = 2.0
+        start_tid = rospy.get_time()
+        test_tid = 5.0
 
         while not rospy.is_shutdown():
-            self.instruction_parse()
-
             # Uppdaterar odometri
             prev_ticks_left, prev_ticks_right = self.update_odometry(prev_ticks_left, prev_ticks_right)
-            self._log_to_csv()
+            nuvarande_tid = rospy.get_time()
+            passerad_tid = nuvarande_tid - start_tid
+            
+            if passerad_tid < test_tid:
+                v =0.2
+                omega = test_omega
+            else:
+                v = 0.0
+                omega = 0
+                self._publish_cmd(v,omega)
+                rospy.loginfo("test färdigt")
+                break
 
-            if self.Goal_reached():
-                rospy.loginfo_throttle(2, "Är i önskade position  :)")
-                self._publish_cmd(v=0.0, omega=0.0)
-                rate.sleep()
-                continue
-
-            self.calculate_desired_direction()       #  Bräkna önskade  riktning 
-            theta_error = self.check_angle_error()    # Kolla vinkelfel och styr
-
-            # if abs(theta_error) > Accepted_angle:
-            #     # Fel > 20 grader — stanna och rotera på plats
-            #     self._publish_cmd(v=0.0, omega= 0.0)
-            #     prev_ticks_left,prev_ticks_right = self.rotation_to_correct(rate, dt, prev_ticks_left, prev_ticks_right)
-            # else:
-            self.straight_forward(dt)     # Fel < 20 grader — kör rakt med PID
-
-
+            self._publish_cmd(v,omega)
+            self._csv_writer.writerow([nuvarande_tid, omega, self._position[2]])
+            
             rate.sleep()
+
+            
+            # self.calculate_desired_direction()       #  Bräkna önskade  riktning 
+            # theta_error = self.check_angle_error()    # Kolla vinkelfel och styr
+
+            # # if abs(theta_error) > Accepted_angle:
+            # #     # Fel > 20 grader — stanna och rotera på plats
+            # #     self._publish_cmd(v=0.0, omega= 0.0)
+            # #     prev_ticks_left,prev_ticks_right = self.rotation_to_correct(rate, dt, prev_ticks_left, prev_ticks_right)
+            # # else:
+            # self.straight_forward(dt)     # Fel < 20 grader — kör rakt med PID
+
+
+            # rate.sleep()
 
     def on_shutdown(self):
         rospy.loginfo("Stoppar Roboten")
