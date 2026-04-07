@@ -7,6 +7,7 @@ import csv
 from duckietown.dtros import DTROS, NodeType
 from duckietown_msgs.msg import Twist2DStamped , WheelEncoderStamped
 from std_msgs.msg import String
+from std_msgs.msg import Imu
 
 
 
@@ -47,8 +48,7 @@ class TwistControlNode(DTROS):
         self._ticks_left  = None
         self._ticks_right = None
         self._position = [0.0, 0.0, 0.0]          # Odometri — position (x, y, theta)
-
-        self.goal_pose = [4, 0]               # (x, y) —>>> målet vi kör mot
+    
         self._v     = self.VELOCITY
 
         self._theta_error_integral = 0.0          # PI-state
@@ -57,18 +57,18 @@ class TwistControlNode(DTROS):
         self.unwrapped_theta = 0
         self.senast_tid = rospy.get_time()
         self.calc_omega = 0
-
+        self.latest_imu_gyro_z = 0.0
         self._publisher = rospy.Publisher(self.twist_topic, Twist2DStamped, queue_size=1)    # Publisher för körkommandon
         self.sub_instructions = rospy.Subscriber(self.instruction_topic, String, self.callback_comm)
         self.sub_left = rospy.Subscriber(self.left_enc_topic,  WheelEncoderStamped, self.callback_left)
         self.sub_right = rospy.Subscriber(self.right_enc_topic, WheelEncoderStamped, self.callback_right)
-        self.imu_read = rospy.Subscriber (self.imu_topic, String, self.callback_imu)
+        self.imu_read = rospy.Subscriber (self.imu_topic, Imu, self.callback_imu)
         rospy.loginfo("Rak körning med PI-styrning startad")
 
         ##system id methods.
         self._csv_file = open('/data/angle_log.csv', 'w', newline='')
         self._csv_writer = csv.writer(self._csv_file)
-        self._csv_writer.writerow(['timestamp', 'desired_theta_deg', 'actual_theta_deg', 'calc_omega'])
+        self._csv_writer.writerow(['timestamp', 'omega_to_spin', 'absolute_theta', 'calc_omega', 'gyroZ'])
 
     def _log_to_csv(self): #logga tid, desired angle, actual angle och theta error. 
         rospy.loginfo("skriver rad")
@@ -77,6 +77,7 @@ class TwistControlNode(DTROS):
 
     def callback_imu(self, data):
         self.imu_data= data.data
+        self.latest_imu_gyro_z = data.angular_velocity.z
 
     def callback_comm(self,msg):
         self.instruction = msg.data
@@ -229,7 +230,7 @@ class TwistControlNode(DTROS):
             prev_ticks_left, prev_ticks_right = self.update_odometry(prev_ticks_left, prev_ticks_right)
             nuvarande_tid = rospy.get_time()
             passerad_tid = nuvarande_tid - start_tid
-            rospy.loginfo(f"test färdigt:{self.imu_data}")
+            rospy.loginfo(f"imutest:{self.imu_data} Z:{self.latest_imu_gyro_z}")
             if passerad_tid < 1:
                 v =0.2
                 omega = 0
@@ -243,7 +244,7 @@ class TwistControlNode(DTROS):
                 v =0.2
                 omega = -test_omega
             elif passerad_tid < 10:
-                v =0.2
+                v =0.0
                 omega = 0
             else:
                 v = 0.0
@@ -256,7 +257,8 @@ class TwistControlNode(DTROS):
             self._csv_writer.writerow([nuvarande_tid, 
                                        omega, 
                                        self.unwrapped_theta,
-                                       self.calc_omega])
+                                       self.calc_omega,
+                                       self.latest_imu_gyro_z])
             
             rate.sleep()
 
