@@ -29,7 +29,9 @@ MIN_AVOID_CYCLES = 15             # Minsta antal cykler i undvikande
 MIN_AVOID_DISTANCE = 0.25   # meter mi-nsta köravstånd
 WALL_THRESHOLD = 80
 
+   
 
+   
 IDLE = "IDLE"         # Ingen aktivitet, lyssnar på ToF
 SCANNING = "SCANNING"
 AVOIDING = "AVOIDING"   # Svänger förbi ett hinder
