@@ -77,7 +77,7 @@ class TwistControlNode(DTROS):
     def _log_to_csv(self): #logga tid, desired angle, actual angle och theta error. 
         rospy.loginfo("skriver rad")
         time=rospy.get_time()
-        self._csv_writer.writerow([time,self.DESIRED_THETA,self._position[2]])
+        self._csv_writer.writerow([time,self.DESIRED_THETA,self._position[2],self.calc_omega,self.latest_imu_gyro_z])
 
     def callback_imu(self, data):
         self.latest_imu_gyro_z = data.angular_velocity.z - self.gyro_bias
@@ -245,6 +245,7 @@ class TwistControlNode(DTROS):
         while (self._ticks_left is None or self.latest_imu_gyro_z==0) and not rospy.is_shutdown():
             rate.sleep()
         self.calibrate_gyro(duration=2.0)
+        rospy.loginfo(f"IMU bias = {self.gyro_bias}")
         prev_ticks_left  = self._ticks_left
         prev_ticks_right = self._ticks_right
         test_omega = 2.0 
@@ -254,7 +255,7 @@ class TwistControlNode(DTROS):
             prev_ticks_left, prev_ticks_right = self.update_odometry(prev_ticks_left, prev_ticks_right)
             nuvarande_tid = rospy.get_time()
             passerad_tid = nuvarande_tid - start_tid
-            rospy.loginfo(f"imutest:{self.imu_data} Z:{self.latest_imu_gyro_z}")
+            rospy.loginfo(f"imutest Z:{self.latest_imu_gyro_z}")
             if passerad_tid < 1:
                 v =0.2
                 omega = 0
