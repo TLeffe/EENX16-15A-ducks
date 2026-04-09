@@ -57,6 +57,11 @@ class TwistControlNode(DTROS):
         self.senast_tid = rospy.get_time()
         self.calc_omega = 0
         self.latest_imu_gyro_z = 0.0
+
+        self.gyro_bias = 0.0
+        self.is_calibrating = False
+
+
         self._publisher = rospy.Publisher(self.twist_topic, Twist2DStamped, queue_size=1)    # Publisher för körkommandon
         self.sub_instructions = rospy.Subscriber(self.instruction_topic, String, self.callback_comm)
         self.sub_left = rospy.Subscriber(self.left_enc_topic,  WheelEncoderStamped, self.callback_left)
@@ -75,12 +80,29 @@ class TwistControlNode(DTROS):
         self._csv_writer.writerow([time,self.DESIRED_THETA,self._position[2]])
 
     def callback_imu(self, data):
-        self.latest_imu_gyro_z = data.angular_velocity.z
+        self.latest_imu_gyro_z = data.angular_velocity.z - self.gyro_bias
 
     def callback_comm(self,msg):
         self.instruction = msg.data
         rospy.loginfo(f"recieved instructions:{self.instruction}")
-    
+    def calibrate_gyro(self, duration=2.0):
+        rospy.loginfo("Starting Gyro Calibration...")
+        
+        samples = []
+        start_time = rospy.get_time()
+        
+        # Use a high-frequency loop to grab as many samples as possible
+        rate = rospy.Rate(50) 
+        while rospy.get_time() - start_time < duration and not rospy.is_shutdown():
+            # latest_imu_gyro_z is updated in the callback
+            samples.append(self.latest_imu_gyro_z)
+            rate.sleep()
+
+        if len(samples) > 0:
+            self.gyro_bias = sum(samples) / len(samples)
+            rospy.loginfo(f"Calibration Complete. Bias: {self.gyro_bias:.5f} rad/s")
+        else:
+            rospy.logwarn("Calibration failed: No IMU samples received.") 
 
 
     def instruction_parse(self):  # tar hand om inkommande instruktioner, ska vara string på formen self.vehicle_name,x,y,theta,x1,y1,x2,y2 
@@ -188,10 +210,11 @@ class TwistControlNode(DTROS):
         d =  (dl + dr) / 2.0                   # sträcka framåt
         dtheta = (dr - dl) / AXIS_LENGTH       # svängning i radianer eller förändning i vinkel
         self.calc_omega = dtheta/dt
-        ##filter, kommentera tillbaka om du vill använda både gyro och hjulen
+        ##filter, kommentera tillbaka om du vill använda både gyro och hjulen##
         # alpha = 0.90 
         # fused_dtheta = alpha * (self.latest_imu_gyro_z * dt) + (1 - alpha) * dtheta_enc     
         # midpoint_theta  = self._position[2] + fused_dtheta/2.0
+        #------------------------------------------------------------------##
         midpoint_theta  = self._position[2] + dtheta / 2.0
         self._position[0] += d * math.cos(midpoint_theta)
         self._position[1] += d * math.sin(midpoint_theta)
@@ -218,16 +241,15 @@ class TwistControlNode(DTROS):
     def run(self):
         rate = rospy.Rate(40)
 
-        rospy.loginfo("Väntar på encoder data.")
-        while (self._ticks_left is None or self._ticks_right is None) and not rospy.is_shutdown():
-            rate.sleep()         
+        rospy.loginfo("Väntar på att sensorer vaknar....")
+        while (self._ticks_left is None or self.latest_imu_gyro_z==0) and not rospy.is_shutdown():
+            rate.sleep()
+        self.calibrate_gyro(duration=2.0)
         prev_ticks_left  = self._ticks_left
         prev_ticks_right = self._ticks_right
-        rospy.loginfo(f"Encoder OK! start: V= {prev_ticks_left}  H={prev_ticks_right}")
-        rospy.loginfo(f"Start -->>> Mal:{self.goal_pose}")
-        test_omega = 2.0
+        test_omega = 2.0 
         start_tid = rospy.get_time()
-
+        rospy.loginfo("startar datainsamling...")
         while not rospy.is_shutdown():
             prev_ticks_left, prev_ticks_right = self.update_odometry(prev_ticks_left, prev_ticks_right)
             nuvarande_tid = rospy.get_time()
