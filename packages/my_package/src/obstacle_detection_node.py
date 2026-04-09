@@ -31,7 +31,7 @@ WALL_THRESHOLD = 80
 
    
 
-   
+
 IDLE = "IDLE"         # Ingen aktivitet, lyssnar på ToF
 SCANNING = "SCANNING"
 AVOIDING = "AVOIDING"   # Svänger förbi ett hinder
@@ -100,7 +100,7 @@ class ObstacleDetectionNode(DTROS):
     def callback_tof(self, msg):   #  Körs varje gång ToF-sensorn skickar ett nytt avstånd.
 
         self.tof_range = msg.range      # Sparar senaste avståndet
-        if msg.range < TOF_WALL_DIST and self.state in (IDLE, SCANNING, AVOIDING):         # Kolla om avståndet är mindre än 0.17
+        if msg.range < TOF_WALL_DIST and self.state in (IDLE, SCANNING, AVOIDING, RETURNING):         # Kolla om avståndet är mindre än 0.17
             rospy.loginfo(f"ToF VÄGG: {msg.range:.2f}m < {TOF_WALL_DIST}m --->>> backar direkt")
             self.obstacle_pub.publish(Bool(data=True))
             self.stop()
@@ -224,7 +224,7 @@ class ObstacleDetectionNode(DTROS):
         )
         # Sväng mot den sida som har mest plats
         if left_space < WALL_THRESHOLD and right_space < WALL_THRESHOLD:
-            rospy.loginfo_throttle( f"VÄGG  |  vänster={left_space} | höger={right_space} --> backar")
+            rospy.loginfo_throttle(1.0, f"VÄGG  |  vänster={left_space} | höger={right_space} --> backar")
             return True, 0.0, True, 0.0
         
         if left_space > right_space:
