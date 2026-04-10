@@ -30,7 +30,7 @@ class Comm(DTROS):
                     except socket.timeout:
                         continue
                     message=data.decode()
-                    rospy.loginfo(f"hearing:'{message}'") #skickar vad vi tar emot i terminalen, debugging
+                    # rospy.loginfo(f"hearing:'{message}'") #skickar vad vi tar emot i terminalen, debugging
                     if self._vehicle_name in message:
                         #todo, parse vad vi vill höra från meddelandet.
                         start_of_relevance = message.find(self._vehicle_name) #find start string of relevant data  determined with the bot name

@@ -43,10 +43,14 @@ class TwistControlNode(DTROS):
         self.desired_theta_topic = f"/{self.vehicle_name}/twist_control_node/desired_theta"
         self.current_theta_topic = f"/{self.vehicle_name}/twist_control_node/current_theta"
         self.obstacle_topic      = f"/{self.vehicle_name}/obstacle_detection_node/obstacle_detected"
-        # if self.vehicle_name == 'duck4':
-        #     KP_THETA = 3
-        #     KI_THETA = 0.1
-        #     KD_THETA = 0.2
+        if self.vehicle_name == 'duck4':
+            KP_THETA = 22
+            KI_THETA = 0.1
+            KD_THETA = 0.2
+        elif self.vehicle_name == 'duck3':
+            KP_THETA = 22
+            KI_THETA = 0.1
+            KD_THETA = 0.2
         #----------Things for IMU----------#
         self.imu_topic = f"/{self.vehicle_name}/imu_node/raw"
         self.senast_tid = rospy.get_time()
@@ -204,7 +208,7 @@ class TwistControlNode(DTROS):
         theta_error = self.check_angle_error()  
         omega = self.PID_omega(theta_error, dt)
         self._publish_cmd(v=self.VELOCITY, omega= omega)
-        rospy.loginfo(f"nu ska jag publicerat")
+        # rospy.loginfo(f"nu ska jag publicerat")
 
     def Goal_reached(self):
         """Returnera True om Roboten är inom 5 cm från målet"""
@@ -218,8 +222,8 @@ class TwistControlNode(DTROS):
     def update_odometry(self, prev_tick_left, prev_ticks_right):
         current_time = rospy.get_time()
         dt = current_time - self.senast_tid
-        if dt <= 0:
-            dt = 1/25
+        # if dt <= 0:
+        #     dt = 1/25
 
         dNl = self._ticks_left  - prev_tick_left
         dNr = self._ticks_right - prev_ticks_right
@@ -228,7 +232,7 @@ class TwistControlNode(DTROS):
         dr = WHEEL_CIRC * (dNr / TICKS_PER_REV)   # höger hjul i meter
         d =  (dl + dr) / 2.0                   # sträcka framåt
         dtheta_enc = (dr - dl) / AXIS_LENGTH       # svängning i radianer eller förändning i vinkel
-        alpha = 0.90
+        alpha = 0.70
         gyro_dtheta = (self.latest_imu_gyro_z-self.gyro_bias)*dt
         fused_dtheta = alpha *gyro_dtheta + (1-alpha) * dtheta_enc # använder både gyro och enc för rotation. 
 
@@ -242,15 +246,34 @@ class TwistControlNode(DTROS):
 
     def calculate_desired_direction(self):
 
+    #     dx_g = self.goal_pose[0] - self._position[0]        # beräknar skillnaden mellan målet och nuvarande pos
+    #     dy_g = self.goal_pose[1] - self._position[1]
+
+    #     dist_goal = math.sqrt(dx_g**2 + dy_g**2)
+        
+    #     if dist_goal < 0.005:       # Om roboten redan är vid målet, avsluta funktionen
+    #         return
+    #     # self.DESIRED_THETA = math.atan2(dy_g, dx_g)     # Beräknar önskad vinkel (theta) mot målet
+    #     self.DESIRED_THETA = math.atan2(self.goal_pose[1] - self._position[1],self.goal_pose[0] - self._position[0]  )  
+    #     dist = math.sqrt(dx_g**2 + dy_g**2)
+    #     self.VELOCITY  = min(BASE_SPEED,dist)
+
+    #     # publicera desired_theta och current theta varje cykel, då obstacle_detection läser dessa info
+    #     self.desired_theta_pub.publish(Float32(data=self.DESIRED_THETA))
+    #    # self.current_theta_pub.publish(Float32(data=self._position[2]))
+    
         dx_g = self.goal_pose[0] - self._position[0]        # beräknar skillnaden mellan målet och nuvarande pos
         dy_g = self.goal_pose[1] - self._position[1]
 
         dist_goal = math.sqrt(dx_g**2 + dy_g**2)
+        phi_goal = math.atan2(dy_g,dx_g) #heading to goal
         
         if dist_goal < 0.005:       # Om roboten redan är vid målet, avsluta funktionen
             return
+        k_lateral = 1.5
+        lateral_correction = -k_lateral * self._position[1]
         # self.DESIRED_THETA = math.atan2(dy_g, dx_g)     # Beräknar önskad vinkel (theta) mot målet
-        self.DESIRED_THETA = math.atan2(self.goal_pose[1] - self._position[1],self.goal_pose[0] - self._position[0]  )  
+        self.DESIRED_THETA = phi_goal + lateral_correction
         dist = math.sqrt(dx_g**2 + dy_g**2)
         self.VELOCITY  = min(BASE_SPEED,dist)
 
