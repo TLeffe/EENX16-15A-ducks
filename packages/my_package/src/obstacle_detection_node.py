@@ -165,7 +165,7 @@ class ObstacleDetectionNode(DTROS):
     def compute_avoid_distance(self, tof_dist, edge_angle_deg):    # använder av Pythagoras
         a = max(tof_dist, 0.05)  # undvik division med noll
         b = a * math.tan(math.radians(min(abs(edge_angle_deg), 89.0)))   # abs() gör vinkeln positiv, min() begränsar till 89°
-        c = math.sqrt(a**2 + b**2) 
+        c = math.sqrt(a**2 + b**2) + 0.4
         result = max(MIN_AVOID_DISTANCE, c)
         rospy.loginfo(
             f"Pythagoras: a={a:.2f}m | b={b:.2f}m | "
