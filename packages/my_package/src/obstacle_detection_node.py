@@ -100,7 +100,7 @@ class ObstacleDetectionNode(DTROS):
     def callback_tof(self, msg):   #  Körs varje gång ToF-sensorn skickar ett nytt avstånd.
 
         self.tof_range = msg.range      # Sparar senaste avståndet
-        if msg.range < TOF_WALL_DIST and self.state in (IDLE, SCANNING, AVOIDING, RETURNING):         # Kolla om avståndet är mindre än 0.17
+        if msg.range < TOF_WALL_DIST and self.state in (IDLE, SCANNING, RETURNING):         # Kolla om avståndet är mindre än 0.17
             rospy.loginfo(f"ToF VÄGG: {msg.range:.2f}m < {TOF_WALL_DIST}m --->>> backar direkt")
             self.obstacle_pub.publish(Bool(data=True))
             self.stop()
