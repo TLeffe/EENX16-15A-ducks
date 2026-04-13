@@ -4,6 +4,7 @@ import os
 import cv2       #  används för att bearbeta kamerabilder
 import math
 import rospy
+import threading
 import numpy as np
 from duckietown.dtros import DTROS, NodeType
 from duckietown_msgs.msg import Twist2DStamped
@@ -91,7 +92,14 @@ class ObstacleDetectionNode(DTROS):
         self.distance_driven = 0.0
 
         self.state = IDLE            # State machine — börjar i IDLE
-
+        # bildanalys-tråden: latest_image, image_result.
+        self.lock = threading.Lock()  
+        self.image_result = (False, 0.0, False, 0.0, 1.0)
+        # Starta bildanalys-tråden direkt
+        self.img_thread_running = True
+        self.img_thread = threading.Thread(target=self.image_processing_loop, daemon=True)
+        self.img_thread.start()
+        
         self.scan_results= []        # Lista med undvikande vinklar
         self.scan_start= 0.0
         self.reverse_start  = 0.0    # Starttid för backning
@@ -114,6 +122,23 @@ class ObstacleDetectionNode(DTROS):
 
         rospy.loginfo(f"ObstacleDetectionNode startad")
 
+    def image_processing_loop(self):
+        """
+        Körs kontinuerligt i en separat tråd.
+        Analyserar senaste bilden och sparar resultatet i self.image_result.
+        run()-loopen blockeras ALDRIG av denna tunga beräkning.
+        """
+        rate = rospy.Rate(15)   # 15 Hz – snabbare än run()-loopen (10 Hz)
+        while not rospy.is_shutdown() and self.img_thread_running:
+            with self.lock:
+                img = self.latest_image
+
+            if img is not None:
+                result = self.analys_image(img)
+                with self.lock:
+                    self.image_result = result
+            rate.sleep()
+
     def callback_desired_theta (self, msg):
         if self.state == IDLE:               # Behåll originalvinkeln fryst under undvikande
             self.theta_original= msg.data     # Under AVOIDING/RETURNING ska den INTE skrivas över — vi vill minnas vart vi skulle
@@ -128,8 +153,6 @@ class ObstacleDetectionNode(DTROS):
             rospy.loginfo(f"ToF VÄGG: {msg.range:.2f}m < {TOF_WALL_DIST}m --->>> backar direkt")
             self.obstacle_pub.publish(Bool(data=True))
             self.stop()
-#            self.reverse_start= rospy.Time.now().to_sec()
- #           self.reset_pid()
             self.start_reversing()
 #            self.state=REVERSING
             return
@@ -143,7 +166,7 @@ class ObstacleDetectionNode(DTROS):
                 self.camera_active = False     # Inget hinder nära --> stäng av kamera-analys
 
     def callback_camera(self, msg):     #   Körs varje gång kameran skickar en ny bild.
-        if not self.camera_active:      # Hoppa över om kameran inte är aktiv
+        if not self.camera_active and self.state == IDLE:      # Hoppa över om kameran inte är aktiv
             return
         try: 
             # Gör om den komprimerade bilden till OpenCV-format
@@ -196,11 +219,13 @@ class ObstacleDetectionNode(DTROS):
             f"c={c:.2f}m --->> kör {result:.2f}m"
         )
         return result
-    
+    def get_image_result (self):
+        # Läs senaste bildanalysresultatet trådsäkert.
+        with self.lock:
+            return self.image_result 
+             
     def object_still_in_front(self):
         """Returnerar True om kameran ser ett hinder rakt framför."""
-        if self.latest_image is None:
-            return False
         found, _, _, _, _ = self.analys_image(self.latest_image)
         return found 
     
@@ -219,8 +244,8 @@ class ObstacleDetectionNode(DTROS):
         center_y = height // 2 
         # vi förenklar bilden (mindre data) som gör bildanalys enklare
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)   # Gör bilden gråskalig/ COLOR_BGR2GRAY konverterar bilden från BEG TO GRAY / cv2.cvtColor --> ändra färgeformat på en bild 
-        blurred = cv2.GaussianBlur(gray, (3, 3), 0)  # Suddar lite för att minska brus/(5, 5)  lagom blur vi har 0 då vi låter opencv välja bästa styrkan auto
-        edges = cv2.Canny(blurred, 50, 100)        # Hittar kanter i bilden,  <50 → ignorera, 50–150 → kanske viktigt, 150 → definitivt viktig / (50-150) --> ta bara tydliga kanter, men tillåt lite svagare kant
+        blurred = cv2.GaussianBlur(gray, (5, 5), 0)  # Suddar lite för att minska brus/(5, 5)  lagom blur vi har 0 då vi låter opencv välja bästa styrkan auto
+        edges = cv2.Canny(blurred, 50, 150)        # Hittar kanter i bilden,  <50 → ignorera, 50–150 → kanske viktigt, 150 → definitivt viktig / (50-150) --> ta bara tydliga kanter, men tillåt lite svagare kant
         contours, _  = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)  # hittar kanter i bilden
         '''cv2.findContours()--> tar en edge-bild, hittar alla objekt, returnerar deras former
         cv2.RETR_EXTERNAL --> tar bara yttersta konturer/ cv2.CHAIN_APPROX_SIMPLE--> spara bara vikiga punker'''   
@@ -297,8 +322,10 @@ class ObstacleDetectionNode(DTROS):
 
         while not rospy.is_shutdown():
             now = rospy.Time.now().to_sec()    # Hämtar nuvarande ROS-tid i sekunder
+            found, theta_img, is_wall, edge_deg, turn_sign = self.get_image_result()
+            
             if self.state ==IDLE:   # IDLE--->> väntar på hinder
-                if self.camera_active and self.latest_image is not None:  # Om kamera är aktiv och bild finns
+                if self.camera_active and found :  # Om kamera är aktiv och bild finns
                     self.obstacle_pub.publish(Bool(data=True))    # Publicera att hinder finns
                     self.stop()
                     self.scan_results= []     # Töm gamla scanresultat
@@ -308,16 +335,14 @@ class ObstacleDetectionNode(DTROS):
             
             elif self.state== SCANNING:
                 self.stop()
-                if self.latest_image is not None:  # Om bild finns
-                    found, theta, is_wall, edge_deg, turn_sign = self.analys_image(self.latest_image)
-                    if found and is_wall:     # Om vägg upptäcks
-                        rospy.loginfo("SCANNING --> REVERSING (vägg via kamera)")
-                        self.start_reversing()
-                        rate.sleep(); continue     # Vänta och hoppa till nästa loop
-                    if found:
-                        safe_tof = min(self.tof_range, MAX_TOF_FOR_DISTANCE)
-                        self.scan_results.append((theta, edge_deg, safe_tof, turn_sign))     # Spara undvikande vinkel
-                
+                if found and is_wall:     # Om vägg upptäcks
+                    rospy.loginfo("SCANNING --> REVERSING (vägg via kamera)")
+                    self.start_reversing()
+                    rate.sleep(); continue     # Vänta och hoppa till nästa loop
+                if found:
+                    safe_tof = min(self.tof_range, MAX_TOF_FOR_DISTANCE)
+                    self.scan_results.append((theta_img, edge_deg, safe_tof, turn_sign))     # Spara undvikande vinkel
+            
                 ready = len(self.scan_results) >= SCAN_FRAMES     # Kolla om tillräckligt många bilder samlats
                 timeout = (now -self.scan_start) >= SCAN_TIMEOUT   # Kolla om tiden tagit slut
 
@@ -436,8 +461,8 @@ class ObstacleDetectionNode(DTROS):
                     )
 
             elif self.state == AVOIDING:
-                if self.latest_image is None:
-                    rate.sleep(); continue
+              #  if self.latest_image is None:
+               #     rate.sleep(); continue
                 
                 if self.distance_driven >= self.avoid_distance:
                     self.stop()
@@ -449,7 +474,7 @@ class ObstacleDetectionNode(DTROS):
                     )
                 else:
                     # Kolla efter vägg via kamera (ToF-vägg hanteras i callback)
-                    found, _, is_wall, _,_ = self.analys_image(self.latest_image)
+                   # found, _, is_wall, _,_ = self.analys_image(self.latest_image)
                     if is_wall or self.tof_range<TOF_WALL_DIST:
                         self.stop()
                         self.start_reversing()
@@ -485,15 +510,17 @@ class ObstacleDetectionNode(DTROS):
                     rospy.loginfo("RETURNING: vägg -> REVERSING")
                     self.start_reversing()
                     rate.sleep(); continue
-                if self.tof_range < TOF_THRESHOLD and self.latest_image is not None:  # Om nytt hinder är nära
-                    found,_,_,_,_ =self.analys_image(self.latest_image)
-                    if found:   # Om nytt hinder hittas
-                        self.scan_results=[]   # Töm gamla resultat
-                        self.scan_start = now
-                        self.stop()
-                        self.state = SCANNING
-                        rospy.loginfo("RETURNING -->> SCANNING (nytt hinder)")
-                        rate.sleep(); continue
+                if self.tof_range < TOF_THRESHOLD:  # Om nytt hinder är nära
+                  #  found,_,_,_,_ =self.analys_image(self.latest_image)
+                    self.scan_results=[]   # Töm gamla resulta
+                    self.scan_start = now
+                    self.stop()
+                    self.state = SCANNING
+                    rospy.loginfo("RETURNING -->> SCANNING (nytt hinder)")
+                    rate.sleep(); continue                      
+                 #   if found:   # Om nytt hinder hittas
+                    #    self.scan_results=[]   # Töm gamla resultat
+            
                 if self.rotate_to(self.theta_original):    # Roterar tillbaka till ursprunglig riktning
                     self.obstacle_pub.publish(Bool(data=False))
                     self.camera_active = False
