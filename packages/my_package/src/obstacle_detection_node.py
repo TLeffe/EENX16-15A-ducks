@@ -201,7 +201,7 @@ class ObstacleDetectionNode(DTROS):
         """Returnerar True om kameran ser ett hinder rakt framför."""
         if self.latest_image is None:
             return False
-        found, _, _, _ = self.analys_image(self.latest_image)
+        found, _, _, _, _ = self.analys_image(self.latest_image)
         return found 
     
     def start_reversing (self):  # Sätt tillstånd REVERSING och spara starttid.
@@ -219,8 +219,8 @@ class ObstacleDetectionNode(DTROS):
         center_y = height // 2 
         # vi förenklar bilden (mindre data) som gör bildanalys enklare
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)   # Gör bilden gråskalig/ COLOR_BGR2GRAY konverterar bilden från BEG TO GRAY / cv2.cvtColor --> ändra färgeformat på en bild 
-        blurred = cv2.GaussianBlur(gray, (5, 5), 0)  # Suddar lite för att minska brus/(5, 5)  lagom blur vi har 0 då vi låter opencv välja bästa styrkan auto
-        edges = cv2.Canny(blurred, 50, 150)        # Hittar kanter i bilden,  <50 → ignorera, 50–150 → kanske viktigt, 150 → definitivt viktig / (50-150) --> ta bara tydliga kanter, men tillåt lite svagare kant
+        blurred = cv2.GaussianBlur(gray, (3, 3), 0)  # Suddar lite för att minska brus/(5, 5)  lagom blur vi har 0 då vi låter opencv välja bästa styrkan auto
+        edges = cv2.Canny(blurred, 50, 100)        # Hittar kanter i bilden,  <50 → ignorera, 50–150 → kanske viktigt, 150 → definitivt viktig / (50-150) --> ta bara tydliga kanter, men tillåt lite svagare kant
         contours, _  = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)  # hittar kanter i bilden
         '''cv2.findContours()--> tar en edge-bild, hittar alla objekt, returnerar deras former
         cv2.RETR_EXTERNAL --> tar bara yttersta konturer/ cv2.CHAIN_APPROX_SIMPLE--> spara bara vikiga punker'''   
