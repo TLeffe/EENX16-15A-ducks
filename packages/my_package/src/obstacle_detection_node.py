@@ -30,7 +30,7 @@ REVERSE_DURATION = REVERSE_DISTANCE / REVERSE_SPEED     # Tid för att backa 20 
 MAX_AVOID_ANGLE = math.radians(30)       # Max vinkel för undvikande i radianer
 CAMERA_HFOV = 160.0             # grader - kamerans horisontella synfält på Duckiebot
 MIN_CONTOUR_AREA = 800      # Minsta area för att räkna som objekt
-WALL_THRESHOLD = 80
+WALL_THRESHOLD = 50
 SCAN_FRAMES = 4                      # Antal bilder att samla in vid scanning
 SCAN_TIMEOUT = 1.5               # Max tid för scanning i sekunder
 
@@ -176,7 +176,6 @@ class ObstacleDetectionNode(DTROS):
             self.wall_detected = True
             return
         if msg.range < TOF_THRESHOLD:
-            self.obstacle_pub.publish(Bool(data=True))
             if not self.camera_active:          # kolla om kameran inte redan är aktiv
                 self.camera_active = True
                 rospy.loginfo(f"TOF: Formål på {msg.range:.2f}m ----> aktivera kamera")
@@ -281,7 +280,7 @@ class ObstacleDetectionNode(DTROS):
         bev = self.to_bev(image)   
 
          # -- Steg 2: Förbearbeta bilden 
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)   # Gör bilden gråskalig/ COLOR_BGR2GRAY konverterar bilden från BEG TO GRAY / cv2.cvtColor --> ändra färgeformat på en bild 
+        gray = cv2.cvtColor(bev, cv2.COLOR_BGR2GRAY)   # Gör bilden gråskalig/ COLOR_BGR2GRAY konverterar bilden från BEG TO GRAY / cv2.cvtColor --> ändra färgeformat på en bild 
         blurred = cv2.GaussianBlur(gray, (5, 5), 0)  # Suddar lite för att minska brus/(5, 5)  lagom blur vi har 0 då vi låter opencv välja bästa styrkan auto
         
         # -- Steg 3: Ta bort golvet 
@@ -327,7 +326,7 @@ class ObstacleDetectionNode(DTROS):
         )
         # Sväng mot den sida som har mest plats
         if left_space < WALL_THRESHOLD and right_space < WALL_THRESHOLD:
-            rospy.loginfo_throttle(1.0, f"VÄGG från kamera bild  |  vänster={left_space} | höger={right_space} --> backar")
+            rospy.loginfo_throttle(2.0, f"VÄGG från kamera bild  |  vänster={left_space} | höger={right_space} --> backar")
             return True, 0.0, True, 0.0 , 1.0
         
         if left_space > right_space:
@@ -369,6 +368,7 @@ class ObstacleDetectionNode(DTROS):
                 rospy.logwarn(f"wall_detected=True i [{self.state}] --->>> backar")
                 self.obstacle_pub.publish(Bool(data=True))
                 self.start_reversing()
+                rate.sleep()
                 continue
 
             if self.state ==IDLE:   # IDLE--->> väntar på hinder
@@ -384,8 +384,8 @@ class ObstacleDetectionNode(DTROS):
                 self.stop()
                 if self.latest_image is not None:     # Om vägg upptäcks
                     found, theta, is_wall, edge_deg, turn_sign = self.analys_image(self.latest_image)             
-                    rospy.loginfo("SCANNING --> REVERSING (vägg via BEV-kamera)")
                     if found and is_wall:
+                        rospy.loginfo("SCANNING --> REVERSING (vägg via BEV-kamera)")
                         self.start_reversing()
                         rate.sleep(); continue     # Vänta och hoppa till nästa loop
                     if found:
