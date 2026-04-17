@@ -250,6 +250,23 @@ class TwistControlNode(DTROS):
         return dt, self._ticks_left, self._ticks_right
 
     def calculate_desired_direction(self):
+
+    #     dx_g = self.goal_pose[0] - self._position[0]        # beräknar skillnaden mellan målet och nuvarande pos
+    #     dy_g = self.goal_pose[1] - self._position[1]
+
+    #     dist_goal = math.sqrt(dx_g**2 + dy_g**2)
+        
+    #     if dist_goal < 0.005:       # Om roboten redan är vid målet, avsluta funktionen
+    #         return
+    #     # self.DESIRED_THETA = math.atan2(dy_g, dx_g)     # Beräknar önskad vinkel (theta) mot målet
+    #     self.DESIRED_THETA = math.atan2(self.goal_pose[1] - self._position[1],self.goal_pose[0] - self._position[0]  )  
+    #     dist = math.sqrt(dx_g**2 + dy_g**2)
+    #     self.VELOCITY  = min(BASE_SPEED,dist)
+
+    #     # publicera desired_theta och current theta varje cykel, då obstacle_detection läser dessa info
+    #     self.desired_theta_pub.publish(Float32(data=self.DESIRED_THETA))
+    #    # self.current_theta_pub.publish(Float32(data=self._position[2]))
+    
         dx_g = self.goal_pose[0] - self._position[0]        # beräknar skillnaden mellan målet och nuvarande pos
         dy_g = self.goal_pose[1] - self._position[1]
 
@@ -271,6 +288,15 @@ class TwistControlNode(DTROS):
 
     def run(self):
         rate = rospy.Rate(25)
+        
+
+
+#        rospy.loginfo("Väntar på Startposition from Comm-node.")
+#        while self.position is  None and not rospy.is_shutdown():
+#            self.instruction_parse()
+ #           rospy.loginfo_throttle(2, "Väntar på init_pose...")
+  #          rate.sleep()
+        
         rospy.loginfo("Väntar på encoder data.")
         while (self._ticks_left is None or self._ticks_right is None) and not rospy.is_shutdown():
             rate.sleep() 
@@ -290,8 +316,7 @@ class TwistControlNode(DTROS):
             dt, prev_ticks_left, prev_ticks_right = self.update_odometry(prev_ticks_left, prev_ticks_right)
             self.current_theta_pub.publish(Float32(data=self._position[2]))
             if self.obstacle_active:
-                dt, prev_ticks_left, prev_ticks_right = self.update_odometry(prev_ticks_left, prev_ticks_right)
-                self.current_theta_pub.publish(Float32(data=self._position[2]))
+                self._publish_cmd(v=0.0, omega=0.0)
                 rate.sleep()
                 continue
 
