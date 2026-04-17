@@ -51,7 +51,7 @@ FALLBACK_MAX_PER_DIR = math.radians(80)
 MIN_AVOID_DISTANCE = 0.25   # meter mi-nsta köravstånd
 MAX_AVOID_DISTANCE = 1.20   # m - övre gräns (skydd om Pythagoras ger orimligt värde)
 MAX_AVOID_TIME = 5.0       # s - max tid i AVOIDING fastnar
-STATE_TIMEOUT = 10.0
+STATE_TIMEOUT = 6.0
 
 
 # --- BEV
@@ -227,11 +227,6 @@ class ObstacleDetectionNode(DTROS):
         
         self.tof_range = msg.range      # Sparar senaste avståndet
         self.tof_initialized = True
-
-        if msg.range < TOF_WALL_DIST and self.state != REVERSING:         # Kolla om avståndet är mindre än 0.17
-            rospy.loginfo(f"ToF VÄGG: {msg.range:.2f}m < {TOF_WALL_DIST}m --->>> backar direkt")
-            self.wall_detected = True
-            return
         if msg.range < TOF_WALL_DIST and self.state != REVERSING:
            # if not self.camera_active:          # kolla om kameran inte redan är aktiv
             self.camera_active = True
@@ -427,9 +422,10 @@ class ObstacleDetectionNode(DTROS):
             turn_sign = -1.0     # negativ omega = höger
             rospy.loginfo("Mest plats på HÖGER --->>> svänger höger")
         
-
         pixel_offset = (edge_pixel- width/2.0) /(width/2.0) * (CAMERA_HFOV /2)  # Pixel till vinkel
-        angle_error = max(-MAX_AVOID_ANGLE, min(MAX_AVOID_ANGLE, math.radians(pixel_offset)))    # Begränsa vinkel
+       # angle_error = max(-MAX_AVOID_ANGLE, min(MAX_AVOID_ANGLE, math.radians(pixel_offset)))    # Begränsa vinkel
+        angle_error = math.radians(max(-30.0, min(30.0, pixel_offset)))
+
         theta_avoid = self.normalize_angle(self.current_theta + angle_error)       # Beräkna undvikande riktning
         edge_angle_deg = math.degrees(abs(angle_error))  #Konverterar vinkeln från radianer till grader och gör den positiv.
 
@@ -529,6 +525,8 @@ class ObstacleDetectionNode(DTROS):
 
             elif self.state ==SCAN_FALLBACK:
                 delta = abs(self.normalize_angle(self.current_theta - self.fallback_prev_theta))
+                delta= min(delta, math.radians(10))  # max 10° per tick
+
                 self.fallback_total_rotated += delta
                 self.fallback_rotated_per_dir += delta
                 self.fallback_prev_theta     = self.current_theta
