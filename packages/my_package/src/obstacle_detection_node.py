@@ -5,7 +5,6 @@ import cv2       #  används för att bearbeta kamerabilder
 import math
 import rospy
 import yaml
-import threading
 import numpy as np
 from duckietown.dtros import DTROS, NodeType
 from duckietown_msgs.msg import Twist2DStamped
@@ -28,7 +27,7 @@ REVERSE_DISTANCE = 0.20 # m
 REVERSE_DURATION = REVERSE_DISTANCE / REVERSE_SPEED     # Tid för att backa 20 cm
 
 #---- camera------
-MAX_AVOID_ANGLE = math.radians(30)       # Max vinkel för undvikande i radianer
+MAX_AVOID_ANGLE = math.radians(25)       # Max vinkel för undvikande i radianer
 CAMERA_HFOV = 160.0             # grader - kamerans horisontella synfält på Duckiebot
 MIN_CONTOUR_AREA = 800      # Minsta area för att räkna som objekt
 WALL_THRESHOLD = 50
@@ -62,8 +61,8 @@ BEV_H = 300      # BEV-bildens höjd (efter transformation)
 #  Kamera-intrinsics (från er kalibreringsfil) 
 # Används för att rätta linsförvrängning innan BEV-transformation.
 CAMERA_MATRIX = np.array([
-    [309.34488578183976, 0.0,318.97431157284797],
-    [0.0, 324.3079313761394,249.74718090589798],
+    [309.34488578183976, 0.0, 318.97431157284797],
+    [0.0, 324.3079313761394, 249.74718090589798],
     [0.0, 0.0, 1.0]
 ], dtype=np.float64)
 
@@ -141,9 +140,8 @@ class ObstacleDetectionNode(DTROS):
 
         #  Undistortion-karta (beräknas EN gång, snabb sedan) 
         # cv2.initUndistortRectifyMap ger pixelkartor -> remap är ungefär 3 ms
-        h, w = 480, 640
         self._map1, self._map2 = cv2.initUndistortRectifyMap(
-            CAMERA_MATRIX, DIST_COEFFS, None, CAMERA_MATRIX, (w, h), cv2.CV_16SC2)
+            CAMERA_MATRIX, DIST_COEFFS, None, CAMERA_MATRIX, (640, 480), cv2.CV_16SC2)
         rospy.loginfo("Undistortion-karta beräknad")
 
         # Homografi
@@ -180,7 +178,7 @@ class ObstacleDetectionNode(DTROS):
                 data = yaml.safe_load(f)
 
             if 'homography' not in data:
-                rospy.logwarn(f"Nyckel 'homography' saknas i {path}")
+                rospy.logwarn(f"Nyckel 'homography' saknas i YAML")
                 return None
 
             H_list = data['homography']
@@ -202,14 +200,8 @@ class ObstacleDetectionNode(DTROS):
         Fallback-homografi om kalibreringsfilen saknas.
         Baserad på typiska Duckiebot-mått (kameran 10 cm över golvet, ungefär 15° nedåt).
         """
-        src = np.float32([
-            [200, 180], [440, 180],
-            [560, 380], [ 80, 380]
-        ])
-        dst = np.float32([
-            [ 80,   0], [320,   0],
-            [320, BEV_H], [ 80, BEV_H]
-        ])
+        src = np.float32([[200, 180], [440, 180],[560, 380], [80, 380]])
+        dst = np.float32([[80,0], [320,0],[320, BEV_H], [80, BEV_H]])
         return cv2.getPerspectiveTransform(src, dst)
         
     def callback_desired_theta (self, msg):
@@ -229,7 +221,7 @@ class ObstacleDetectionNode(DTROS):
         self.tof_initialized = True
         if msg.range < TOF_WALL_DIST and self.state != REVERSING:
            # if not self.camera_active:          # kolla om kameran inte redan är aktiv
-            self.camera_active = True
+            self.wall_detected = True
             rospy.loginfo(f"TOF: Formål på {msg.range:.2f}m ----> aktivera kamera")
             return
         
@@ -271,7 +263,7 @@ class ObstacleDetectionNode(DTROS):
         self._integral = 0.0
         self._prev_error = 0.0
 
-    def pid_steer(self, target, dt=0.1):
+    def pid_steer(self, target, dt):
         if target is None or dt <= 0:
             return 0.0
         error = self.angle_error_to(target)
@@ -291,7 +283,6 @@ class ObstacleDetectionNode(DTROS):
             self.stop()
             rospy.loginfo(f"Nu ska jag rotera mot given vinkel :::)))")
             return True
-
         self.twist_pub.publish(Twist2DStamped(v=0.0, omega=self.pid_steer(target, dt)))   # Roterar på plats
         return False
     
@@ -325,7 +316,7 @@ class ObstacleDetectionNode(DTROS):
             self.camera_active = False
             self.wall_detected = False
             self.obstacle_pub.publish(Bool(data=False))
-            self.state            = IDLE
+            self.state = IDLE
             self.state_entry_time = now
             return True
         return False
@@ -422,12 +413,12 @@ class ObstacleDetectionNode(DTROS):
             turn_sign = -1.0     # negativ omega = höger
             rospy.loginfo("Mest plats på HÖGER --->>> svänger höger")
         
-        pixel_offset = (edge_pixel- width/2.0) /(width/2.0) * (CAMERA_HFOV /2)  # Pixel till vinkel
+        pixel_offset = (edge_pixel- width/2.0) / (width/2.0) * (CAMERA_HFOV /2)  # Pixel till vinkel
        # angle_error = max(-MAX_AVOID_ANGLE, min(MAX_AVOID_ANGLE, math.radians(pixel_offset)))    # Begränsa vinkel
-        angle_error = math.radians(max(-30.0, min(30.0, pixel_offset)))
-
-        theta_avoid = self.normalize_angle(self.current_theta + angle_error)       # Beräkna undvikande riktning
-        edge_angle_deg = math.degrees(abs(angle_error))  #Konverterar vinkeln från radianer till grader och gör den positiv.
+        angle_rad = math.radians(pixel_offset)
+        angle_rad = max(-MAX_AVOID_ANGLE, min(MAX_AVOID_ANGLE, angle_rad))
+        theta_avoid = self.normalize_angle(self.current_theta + angle_rad)       # Beräkna undvikande riktning
+        edge_angle_deg = math.degrees(abs(angle_rad))  #Konverterar vinkeln från radianer till grader och gör den positiv.
 
 
         rospy.loginfo_throttle(
@@ -518,15 +509,14 @@ class ObstacleDetectionNode(DTROS):
                     self.fallback_scan_start_theta = self.current_theta
                     self.fallback_scan_dir = -1.0  # Börja med att rotera åt höger
                     self.fallback_total_rotated = 0.0
+                    self.fallback_rotated_per_dir = 0.0
                     self.fallback_prev_theta = self.current_theta
                     self.reset_pid()
                     self.state=SCAN_FALLBACK
                     self.state_entry_time = now
 
             elif self.state ==SCAN_FALLBACK:
-                delta = abs(self.normalize_angle(self.current_theta - self.fallback_prev_theta))
-                delta= min(delta, math.radians(10))  # max 10° per tick
-
+                delta = min(abs(self.normalize_angle(self.current_theta - self.fallback_prev_theta)), math.radians(10))
                 self.fallback_total_rotated += delta
                 self.fallback_rotated_per_dir += delta
                 self.fallback_prev_theta     = self.current_theta
@@ -541,7 +531,7 @@ class ObstacleDetectionNode(DTROS):
                         f"SCAN_FALLBACK -->FB_DRIVING  |"
                         F" Riktning 0 {math.degrees(self.theta_avoid):.1f}"
                     )
-                elif self.fallback_rotated_per_dir >= FALLBACK_MAX_PER_DIR and self.fallback_scan_dir == -1.0:   #  prova vänster
+                elif (self.fallback_rotated_per_dir >= FALLBACK_MAX_PER_DIR and self.fallback_scan_dir == -1.0):   #  prova vänster
                     # Inget åt höger - prova vänster istället
                     rospy.logwarn("SCAN_FALLBACK: ingen  år höger -> provar vänstar")
                     self.fallback_scan_dir = 1.0
@@ -577,17 +567,16 @@ class ObstacleDetectionNode(DTROS):
                         f"FB_DRIVING -->> RETURNING | "
                         f"kört={self.fallback_drive_distance:.2f}m"
                     )
+                elif self.tof_range < TOF_WALL_DIST:
+                    rospy.loginfo("FB_DRIVING:   VÄGG---->> REVERSING")
+                    self.start_reversing()
                 else:
-                    if self.tof_range < TOF_WALL_DIST:
-                        rospy.loginfo("FB_DRIVING:   VÄGG---->> REVERSING")
-                        self.start_reversing()
-                    else:
-                        omega = self.pid_steer(self.theta_avoid)
-                        self.twist_pub.publish(Twist2DStamped(v=AVOID_VELOCITY, omega=omega))
-                        rospy.loginfo_throttle(
-                            2.0,
-                            f"FB_DRIVING | {self.fallback_drive_distance:.2f}/{FALLBACK_DRIVE:.2f}m"
-                        )
+                    omega = self.pid_steer(self.theta_avoid, dt)
+                    self.twist_pub.publish(Twist2DStamped(v=AVOID_VELOCITY, omega=omega))
+                    rospy.loginfo_throttle(
+                        2.0,
+                        f"FB_DRIVING | {self.fallback_drive_distance:.2f}/{FALLBACK_DRIVE:.2f}m"
+                    )
 
             elif self.state == ROTATING:        # Om tillstånd är ROTATING
                 if self.rotate_to(self.theta_avoid, dt):
@@ -608,6 +597,7 @@ class ObstacleDetectionNode(DTROS):
                         self.avoid_start_time = now
                         self.reset_pid()
                         self.state = AVOIDING
+                        self.state_entry_time = now
                         rospy.loginfo(
                             f"ROTATING -> AVOIDING | "
                             f"roterat={math.degrees(self.total_rotation_done):.1f}grader | "
@@ -634,20 +624,19 @@ class ObstacleDetectionNode(DTROS):
                     rospy.loginfo(f"AVOIDING -->>> RETURNING |"
                                  f"kört={self.distance_driven:.2f}/{self.avoid_distance:.2f}m"
                     )
+               
+                elif self.tof_range < TOF_WALL_DIST:
+                    rospy.loginfo("AVOIDING: vägg → REVERSING")
+                    self.start_reversing()
                 else:
-
-                    if self.tof_range < TOF_WALL_DIST:
-                        rospy.loginfo("AVOIDING: vägg → REVERSING")
-                        self.start_reversing()
-                    else:
-                        omega = self.pid_steer(self.theta_avoid)
-                        self.twist_pub.publish(Twist2DStamped(v=AVOID_VELOCITY, omega=omega))
-                        self.distance_driven += AVOID_VELOCITY * dt # Uppdatera hur långt vi kört (tid * hastighet)
-                        rospy.loginfo_throttle(2.0,
-                            f"AVOIDING | "
-                            f"{self.distance_driven:.2f}/{self.avoid_distance:.2f}m | "
-                            f"omega={omega:.2f}"
-                        )
+                    omega = self.pid_steer(self.theta_avoid,dt)
+                    self.twist_pub.publish(Twist2DStamped(v=AVOID_VELOCITY, omega=omega))
+                    self.distance_driven += AVOID_VELOCITY * dt # Uppdatera hur långt vi kört (tid * hastighet)
+                    rospy.loginfo_throttle(2.0,
+                        f"AVOIDING | "
+                        f"{self.distance_driven:.2f}/{self.avoid_distance:.2f}m | "
+                        f"omega={omega:.2f}"
+                    )
             elif self.state == REVERSING:
                 elapsed = now - self.reverse_start
                 if elapsed < REVERSE_DURATION:
