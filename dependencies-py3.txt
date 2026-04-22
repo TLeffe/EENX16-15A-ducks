@@ -1,4 +1,3 @@
 # LIST YOUR PYTHON3 PACKAGES HERE
 # NOTE: only place non-Duckietown libraries here; pin versions only if necessary
-opencv-python
-ultralytics
+ultralytics --ignore-installed
