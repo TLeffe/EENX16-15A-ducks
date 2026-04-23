@@ -59,7 +59,6 @@ ARG PIP_INDEX_URL="https://pypi.org/simple"
 ENV PIP_INDEX_URL=${PIP_INDEX_URL}
 COPY ./dependencies-py3.* "${REPO_PATH}/"
 RUN dt-pip3-install "${REPO_PATH}/dependencies-py3.*"
-RUN pip3 install --ignore-installed ultralytics
 # copy the source code
 COPY ./packages "${REPO_PATH}/packages"
 

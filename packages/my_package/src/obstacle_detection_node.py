@@ -417,7 +417,7 @@ class ObstacleDetectionNode(DTROS):
             last_time = now
             
             found, theta_img, is_wall, edge_deg, turn_sign, img_ts = self.get_result()    # Hämta senaste YOLO-resultat från bildtråden.
-            result_age = max(now - img_ts)     # Hur gammalt bildresultatet är
+            result_age = max(0.0, now - img_ts)     # Hur gammalt bildresultatet är
             if result_age > 0.5:    # Ignorera för gamla bildresultat
                 found = False            
             
