@@ -211,9 +211,9 @@ class TwistControlNode(DTROS):
         dtheta = (dr - dl) / AXIS_LENGTH       # svängning i radianer eller förändning i vinkel
         self.calc_omega = dtheta/dt
         ##filter, kommentera tillbaka om du vill använda både gyro och hjulen##
-        alpha = 0.90 
-        fused_dtheta = alpha * (self.latest_imu_gyro_z * dt) + (1 - alpha) * dtheta_enc     
-        midpoint_theta  = self._position[2] + fused_dtheta/2.0
+        # alpha = 0.90 
+        # fused_dtheta = alpha * (self.latest_imu_gyro_z * dt) + (1 - alpha) * dtheta_enc     
+        # midpoint_theta  = self._position[2] + fused_dtheta/2.0
         #------------------------------------------------------------------##
         midpoint_theta  = self._position[2] + dtheta / 2.0
         self._position[0] += d * math.cos(midpoint_theta)
