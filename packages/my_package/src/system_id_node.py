@@ -211,9 +211,9 @@ class TwistControlNode(DTROS):
         dtheta = (dr - dl) / AXIS_LENGTH       # svängning i radianer eller förändning i vinkel
         self.calc_omega = dtheta/dt
         ##filter, kommentera tillbaka om du vill använda både gyro och hjulen##
-        # alpha = 0.90 
-        # fused_dtheta = alpha * (self.latest_imu_gyro_z * dt) + (1 - alpha) * dtheta_enc     
-        # midpoint_theta  = self._position[2] + fused_dtheta/2.0
+        alpha = 0.90 
+        fused_dtheta = alpha * (self.latest_imu_gyro_z * dt) + (1 - alpha) * dtheta_enc     
+        midpoint_theta  = self._position[2] + fused_dtheta/2.0
         #------------------------------------------------------------------##
         midpoint_theta  = self._position[2] + dtheta / 2.0
         self._position[0] += d * math.cos(midpoint_theta)
@@ -248,7 +248,7 @@ class TwistControlNode(DTROS):
         rospy.loginfo(f"IMU bias = {self.gyro_bias}")
         prev_ticks_left  = self._ticks_left
         prev_ticks_right = self._ticks_right
-        test_omega = 2.0 
+        test_omega = 1.0 
         start_tid = rospy.get_time()
         rospy.loginfo("startar datainsamling...")
         while not rospy.is_shutdown():
@@ -256,20 +256,20 @@ class TwistControlNode(DTROS):
             nuvarande_tid = rospy.get_time()
             passerad_tid = nuvarande_tid - start_tid
             rospy.loginfo(f"imutest Z:{self.latest_imu_gyro_z}")
-            if passerad_tid < 1:
+            if passerad_tid < 2:
                 v =0.2
                 omega = 0
-            elif passerad_tid < 3:
-                v =0.2
-                omega = test_omega
             elif passerad_tid < 5:
                 v =0.2
-                omega = 0
+                omega = test_omega
             elif passerad_tid < 8:
                 v =0.2
+                omega = 0
+            elif passerad_tid < 11:
+                v =0.2
                 omega = -test_omega
-            elif passerad_tid < 10:
-                v =0.0
+            elif passerad_tid < 14:
+                v =0.2
                 omega = 0
             else:
                 v = 0.0
