@@ -24,7 +24,7 @@ KI_THETA =  0.1          # integral — kompenserar konstant drift
 OMEGA_MAX = 0.3              # max vridningshastighet (säkerhetsgräns)
 KD_THETA= 0.2
 GOAL_THRESHOLD = 0.10       # 5 cm — mål nått
-BASE_SPEED =  0.3
+BASE_SPEED =  0.4
 class TwistControlNode(DTROS):
 
 
@@ -46,11 +46,15 @@ class TwistControlNode(DTROS):
         if self.vehicle_name == 'duck4':
             KP_THETA = 22
             KI_THETA = 0.1
-            KD_THETA = 0.2
+            KD_THETA = 0.1
         elif self.vehicle_name == 'duck3':
-            KP_THETA = 22
+            KP_THETA = 32
             KI_THETA = 0.1
-            KD_THETA = 0.2
+            KD_THETA = 0.1
+        elif self.vehicle_name == 'duck6':
+            KP_THETA = 12
+            KI_THETA = 0.1
+            KD_THETA = 0.1
         #----------Things for IMU----------#
         self.imu_topic = f"/{self.vehicle_name}/imu_node/raw"
         self.senast_tid = rospy.get_time()
