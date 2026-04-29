@@ -15,14 +15,14 @@ WHEEL_RADIUS = 0.035         # meter — hjulradius
 WHEEL_CIRC = WHEEL_RADIUS * 2 * math.pi   # hjulets omkrets i meter
 TICKS_PER_REV = 135          # ticks per varv
 
-Accepted_angle = math.radians(30)
+Accepted_angle = math.radians(10)
 # -------------------------------------------------------
 # PI-regulator för styrning 
 # -------------------------------------------------------
-KP_THETA = 13               # proportionell — hur hårt vi styr mot rätt riktning
+KP_THETA = 8               # proportionell — hur hårt vi styr mot rätt riktning
 KI_THETA =  0.2          # integral — kompenserar konstant drift
-OMEGA_MAX = 3           # max vridningshastighet (säkerhetsgräns)
-KD_THETA= 0.2
+OMEGA_MAX = 0.5           # max vridningshastighet (säkerhetsgräns)
+KD_THETA= 0
 GOAL_THRESHOLD = 0.05       # 5 cm — mål nått
 BASE_SPEED =  0.5
 class TwistControlNode(DTROS):
@@ -203,7 +203,7 @@ class TwistControlNode(DTROS):
                 break
             
             omega = self.PID_omega(theta_error, dt)
-            self._publish_cmd (v=0.05, omega=omega)      # V = 0 stå still under rotation   
+            self._publish_cmd (v=0.00, omega=omega)      # V = 0 stå still under rotation   
 
             rospy.loginfo_throttle(
                 1, 
@@ -242,10 +242,9 @@ class TwistControlNode(DTROS):
         dr = WHEEL_CIRC * (dNr / TICKS_PER_REV)   # höger hjul i meter
         d =  (dl + dr) / 2.0                   # sträcka framåt
         dtheta_enc = (dr - dl) / AXIS_LENGTH       # svängning i radianer eller förändning i vinkel
-        alpha = 0.70
+        alpha = 0.85
         gyro_dtheta = (self.latest_imu_gyro_z-self.gyro_bias)*dt
-        #fused_dtheta = alpha *gyro_dtheta + (1-alpha) * dtheta_enc # använder både gyro och enc för rotation. 
-        fused_dtheta = self.latest_imu_gyro_z
+        fused_dtheta = alpha *gyro_dtheta + (1-alpha) * dtheta_enc # använder både gyro och enc för rotation. 
 
         midpoint_theta  = self._position[2] + fused_dtheta / 2.0
         self._position[0] += d * math.cos(midpoint_theta)
