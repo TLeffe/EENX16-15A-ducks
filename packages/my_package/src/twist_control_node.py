@@ -19,12 +19,12 @@ Accepted_angle = math.radians(30)
 # -------------------------------------------------------
 # PI-regulator för styrning 
 # -------------------------------------------------------
-KP_THETA = 3               # proportionell — hur hårt vi styr mot rätt riktning
-KI_THETA =  0.1          # integral — kompenserar konstant drift
-OMEGA_MAX = 0.3              # max vridningshastighet (säkerhetsgräns)
+KP_THETA = 13               # proportionell — hur hårt vi styr mot rätt riktning
+KI_THETA =  0.2          # integral — kompenserar konstant drift
+OMEGA_MAX = 3           # max vridningshastighet (säkerhetsgräns)
 KD_THETA= 0.2
-GOAL_THRESHOLD = 0.10       # 5 cm — mål nått
-BASE_SPEED =  0.4
+GOAL_THRESHOLD = 0.05       # 5 cm — mål nått
+BASE_SPEED =  0.5
 class TwistControlNode(DTROS):
 
 
@@ -45,7 +45,7 @@ class TwistControlNode(DTROS):
         self.obstacle_topic      = f"/{self.vehicle_name}/obstacle_detection_node/obstacle_detected"
         if self.vehicle_name == 'duck4':
             KP_THETA = 22
-            KI_THETA = 0.1
+            KI_THETA = 0.01
             KD_THETA = 0.1
         elif self.vehicle_name == 'duck3':
             KP_THETA = 32
@@ -65,14 +65,14 @@ class TwistControlNode(DTROS):
         self.imu_read = rospy.Subscriber (self.imu_topic, Imu, self.callback_imu)
         #-------------------------------------------------------------------------#
 
-        self.VELOCITY = 0.0              # framåthastighet (m/s)
+        self.VELOCITY = 0.3              # framåthastighet (m/s)
         self.DESIRED_THETA = 0.0          # önskad riktning (0 = rakt fram i radianer)
         
         self._ticks_left  = None
         self._ticks_right = None
         self._position = [0.0, 0.0, 0.0]          # Odometri — position (x, y, theta)
 
-        self.goal_pose = [6, 0]               # (x, y) —>>> målet vi kör mot
+        self.goal_pose = [0, 0]               # (x, y) —>>> målet vi kör mot
    
 
         self._theta_error_integral = 0.0          # PI-state
@@ -137,6 +137,7 @@ class TwistControlNode(DTROS):
                 del self.current_order_list[0] # ta bort namnet på roboten
                 self.current_order_list = [float(i) for i in self.current_order_list]
                 self._position[0:3] = self.current_order_list[0:3] #uppdatera postion och vinklar
+                self._position[2] = self._position[2]
                 self.goal_pose[0:2] = self.current_order_list[3:5]
             else:
                 break # om inga nya instruktioner på topic, uppdatera inget
@@ -171,7 +172,7 @@ class TwistControlNode(DTROS):
         self._prev_theta_error = theta_error
 
         self._theta_error_integral += theta_error * dt   # uppdatera integralen (I-delen)
-        self._theta_error_integral = max(-2.0, min(2.0, self._theta_error_integral))
+        self._theta_error_integral = max(-5.0, min(5.0, self._theta_error_integral))
 
         omega = KP_THETA * theta_error + KI_THETA * self._theta_error_integral + self._derivatan
         omega = max(-OMEGA_MAX, min(OMEGA_MAX, omega))     # roboten ska inte vrider sig för snabbt
@@ -202,7 +203,7 @@ class TwistControlNode(DTROS):
                 break
             
             omega = self.PID_omega(theta_error, dt)
-            self._publish_cmd (v=0.0, omega=omega)      # V = 0 stå still under rotation   
+            self._publish_cmd (v=0.05, omega=omega)      # V = 0 stå still under rotation   
 
             rospy.loginfo_throttle(
                 1, 
@@ -243,8 +244,8 @@ class TwistControlNode(DTROS):
         dtheta_enc = (dr - dl) / AXIS_LENGTH       # svängning i radianer eller förändning i vinkel
         alpha = 0.70
         gyro_dtheta = (self.latest_imu_gyro_z-self.gyro_bias)*dt
-        fused_dtheta = alpha *gyro_dtheta + (1-alpha) * dtheta_enc # använder både gyro och enc för rotation. 
-
+        #fused_dtheta = alpha *gyro_dtheta + (1-alpha) * dtheta_enc # använder både gyro och enc för rotation. 
+        fused_dtheta = self.latest_imu_gyro_z
 
         midpoint_theta  = self._position[2] + fused_dtheta / 2.0
         self._position[0] += d * math.cos(midpoint_theta)
@@ -277,12 +278,12 @@ class TwistControlNode(DTROS):
         dist_goal = math.sqrt(dx_g**2 + dy_g**2)
         phi_goal = math.atan2(dy_g,dx_g) #heading to goal
         
-        if dist_goal < 0.005:       # Om roboten redan är vid målet, avsluta funktionen
+        if dist_goal < 0.05:       # Om roboten redan är vid målet, avsluta funktionen
             return
         k_lateral = 1.5
-        lateral_correction = -k_lateral * self._position[1]
+        #lateral_correction = -k_lateral * self._position[1]
         # self.DESIRED_THETA = math.atan2(dy_g, dx_g)     # Beräknar önskad vinkel (theta) mot målet
-        self.DESIRED_THETA = phi_goal + lateral_correction
+        self.DESIRED_THETA = phi_goal
         dist = math.sqrt(dx_g**2 + dy_g**2)
         self.VELOCITY  = min(BASE_SPEED,dist)
 
