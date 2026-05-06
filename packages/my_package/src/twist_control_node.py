@@ -24,7 +24,7 @@ KI_THETA =  0.1          # integral — kompenserar konstant drift
 OMEGA_MAX = 0.3              # max vridningshastighet (säkerhetsgräns)
 KD_THETA= 0.2
 GOAL_THRESHOLD = 0.10       # 5 cm — mål nått
-BASE_SPEED =  0.4
+BASE_SPEED =  0.3
 class TwistControlNode(DTROS):
 
 
@@ -46,15 +46,11 @@ class TwistControlNode(DTROS):
         if self.vehicle_name == 'duck4':
             KP_THETA = 22
             KI_THETA = 0.1
-            KD_THETA = 0.1
+            KD_THETA = 0.2
         elif self.vehicle_name == 'duck3':
-            KP_THETA = 32
+            KP_THETA = 22
             KI_THETA = 0.1
-            KD_THETA = 0.1
-        elif self.vehicle_name == 'duck6':
-            KP_THETA = 12
-            KI_THETA = 0.1
-            KD_THETA = 0.1
+            KD_THETA = 0.2
         #----------Things for IMU----------#
         self.imu_topic = f"/{self.vehicle_name}/imu_node/raw"
         self.senast_tid = rospy.get_time()
@@ -187,11 +183,6 @@ class TwistControlNode(DTROS):
         )
         self.reset_PID()
         while not rospy.is_shutdown():
-            if self.obstacle_active:
-                rospy.loginfo_throttle(1.0, "rotation_to_correct: hinder aktivt, pausar rotation")
-                dt, prev_ticks_left, prev_ticks_right = self.update_odometry(prev_ticks_left, prev_ticks_right)
-                rate.sleep()
-                continue
             self.instruction_parse()
             dt, prev_ticks_left, prev_ticks_right = self.update_odometry(
                 prev_ticks_left, prev_ticks_right

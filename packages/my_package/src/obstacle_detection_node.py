@@ -12,16 +12,11 @@ from duckietown_msgs.msg import Twist2DStamped
 from sensor_msgs.msg import Range, CompressedImage
 from std_msgs.msg import Bool,Float32
 
-try:
-    from ultralytics import YOLO     # Försök importera YOLO från ultralytics
-    YOLO_AVAILABLE = True           # Sätt flagga till True om import lyckades
-except ImportError:
-    YOLO_AVAILABLE = False           # Om import misslyckas finns inte YOLO tillgängligt
 #------Avståndsgränser
 TOF_THRESHOLD = 0.40           # meter - triggar kameran om föremål är närmare än detta
 TOF_WALL_DIST = 0.17   # meter - under detta = vägg, backa direkt utan kamera
 TOF_CLEAR_DIST  = 0.50   # meter - används i ToF-fallback scan
-FALLBACK_DRIVE  = 0.25   # meter - hur långt vi kör i fallback-läge
+FALLBACK_DRIVE  = 0.35   # meter - hur långt vi kör i fallback-läge
 MAX_TOF_FOR_DISTANCE = 0.80   # m - skyddar Pythagoras mot 100m-värden 
 MIN_TOF_VALID        = 0.02   # m - under detta = brus, ignorera
 
@@ -33,26 +28,12 @@ REVERSE_DISTANCE = 0.20 # m
 REVERSE_DURATION = REVERSE_DISTANCE / REVERSE_SPEED     # Tid för att backa 20 cm
 
 #---- camera------
+MAX_AVOID_ANGLE = math.radians(30)       # Max vinkel för undvikande i radianer
 CAMERA_HFOV = 160.0             # grader - kamerans horisontella synfält på Duckiebot
-IMG_W = 640
-IMG_H = 480
-MAX_AVOID_ANGLE = math.radians(25)       # Max vinkel för undvikande i radianer
-
-# -- YOLO
-YOLO_CONF = 0.45   # confidence-tröskel -höj om för många falska positiver
-YOLO_IMGSZ  = 320    # inferensstorlek - 320 är snabbast på Jetson Nano
-SCAN_FRAMES   = 4      # antal frames att samla i SCANNING
-SCAN_TIMEOUT  = 1.5    # s - max tid i SCANNING
-
-# OBSTACLE_CLASSES: lista med klassnamn att reagera på.
-# None = reagera på ALLA klasser (bra för test).
-# Exempel för Duckietown: ["duckie", "duckiebot", "cone"]
-# Exempel för generell COCO-modell: ["person", "chair", "bottle"]
-OBSTACLE_CLASSES = None
-
-WALL_COVER_FRAC = 0.75 # Vägg-tröskel: om hindret täcker > WALL_COVER_FRAC av bildbredden -> vägg
-
-ROI_BOTTOM_FRAC = 0.80 # ROI bara övre ROI_BOTTOM_FRAC av bilden räknas (hindret ska vara framför)
+MIN_CONTOUR_AREA = 800      # Minsta area för att räkna som objekt
+WALL_THRESHOLD = 50
+SCAN_FRAMES = 4                      # Antal bilder att samla in vid scanning
+SCAN_TIMEOUT = 1.5               # Max tid för scanning i sekunder
 
 # ----- PID--
 KP_THETA = 2               # proportionell — hur hårt vi styr mot rätt riktning
@@ -72,24 +53,27 @@ MAX_AVOID_DISTANCE = 1.20   # m - övre gräns (skydd om Pythagoras ger orimligt
 MAX_AVOID_TIME = 5.0       # s - max tid i AVOIDING fastnar
 STATE_TIMEOUT = 6.0
 
+
+# --- BEV
+BEV_W = 400      # BEV-bildens bredd (efter transformation)
+BEV_H = 300      # BEV-bildens höjd (efter transformation)
+
+
 #  Kamera-intrinsics (från er kalibreringsfil) 
 # Används för att rätta linsförvrängning innan BEV-transformation.
 CAMERA_MATRIX = np.array([
-    [309.34488578183976, 0.0, 318.97431157284797],
-    [0.0, 324.3079313761394, 249.74718090589798],
+    [309.34488578183976, 0.0,318.97431157284797],
+    [0.0, 324.3079313761394,249.74718090589798],
     [0.0, 0.0, 1.0]
 ], dtype=np.float64)
 
 DIST_COEFFS = np.array([
-    -0.26850619979326934, 0.14095182385200886,
-    0.029986662850901284,0.000792436879591894,
+    -0.26850619979326934,
+     0.14095182385200886,
+     0.029986662850901284,
+     0.000792436879591894,
     -0.03422901917827191
 ], dtype=np.float64)
-
-# ── YOLO-modellsökvägar (prioritetsordning) ────────────────────────────────────
-YOLO_MODEL_PATHS = [
-    "/data/weights/yolov8n.pt",                              # generell fallback
-]
 
 #---- Tillstånd------- 
 IDLE = "IDLE"         # Ingen aktivitet, lyssnar på ToF
@@ -119,11 +103,11 @@ class ObstacleDetectionNode(DTROS):
 
         #   sensor 
         self.tof_range = float ('inf')     # Senaste avståndet från ToF
-        self.tof_initialized = False
+        self.latest_image = None
         self.camera_active = False         # True när kameran analyserar
         self.state = IDLE            # State machine — börjar i IDLE
         self.wall_detected = False
-        self.state_entry_time = 0.0
+        self.tof_initialized = False
 
         # Vinklar
         self.theta_original          = None  # vinkeln mot målet - fryses i IDLE
@@ -141,6 +125,9 @@ class ObstacleDetectionNode(DTROS):
         self.scan_results= []        # Lista med undvikande vinklar
         self.scan_start= 0.0
         
+        # backnin
+        self.reverse_start  = 0.0    # Starttid för backning
+
         self.fallback_scan_dir = -1.0   # -1 = höger, +1 = vänster
         self.fallback_scan_start_theta = 0.0  # vinkel när fallback-scan startade
         self.fallback_drive_distance   = 0.0
@@ -151,24 +138,20 @@ class ObstacleDetectionNode(DTROS):
         self._integral = 0.0              #   PID-sate
         self._prev_error = 0.0
 
-        self._lock = threading.Lock()
-        self._latest_img = None   # råbild (undistortad)
-        # img_result: (found, theta_avoid, is_wall, edge_angle_deg, turn_sign, timestamp)
-        self._img_result  = (False, 0.0, False, 0.0, 1.0, 0.0)
-        self._img_running = True
 
         #  Undistortion-karta (beräknas EN gång, snabb sedan) 
         # cv2.initUndistortRectifyMap ger pixelkartor -> remap är ungefär 3 ms
+        h, w = 480, 640
         self._map1, self._map2 = cv2.initUndistortRectifyMap(
-            CAMERA_MATRIX, DIST_COEFFS, None, CAMERA_MATRIX, (IMG_W, IMG_H), cv2.CV_16SC2)
+            CAMERA_MATRIX, DIST_COEFFS, None, CAMERA_MATRIX, (w, h), cv2.CV_16SC2)
         rospy.loginfo("Undistortion-karta beräknad")
-        
-        # YOLO
-        self.model = self.load_yolo()
-        self.class_names  = self.model.names if self.model else {}
 
-        # Starta bildtråd
-        threading.Thread(target=self.yolo_loop, daemon=True).start()
+        # Homografi
+        self.M = self.load_homography()
+        if self.M is None:
+            rospy.logwarn("Homografi saknas - använder default-homografi")
+            self.M = self.default_homography()
+        rospy.loginfo(f"Homografi laddad:\n{self.M}")
         
         self.obstacle_pub = rospy.Publisher(self.obstacle_topic, Bool, queue_size=1)    #  Publisher som skickar sant/falskt om hinder finns
         self.twist_pub = rospy.Publisher(self.twist_topic, Twist2DStamped, queue_size=1)  # Publisher som skickar hastighetskommandon till roboten
@@ -180,140 +163,81 @@ class ObstacleDetectionNode(DTROS):
 
         rospy.loginfo(f"ObstacleDetectionNode startad")
 
-    def load_yolo(self):
-        if not YOLO_AVAILABLE:
-            rospy.logwarn("ultralytics inte installerat -------  kör utan YOLO")  # Logga varning
+    def load_homography(self):
+        """
+        Laddar homografi från Duckietowns extrinsic-kalibreringsfil.
+        Sökväg: /data/config/calibrations/camera_extrinsic/<VEHICLE_NAME>.yaml
+        Format: homography: [h11,h12,h13, h21,h22,h23, h31,h32,h33]  (9 värden)
+        """
+        path = f"/data/config/calibrations/camera_extrinsic/{self.vehicle_name}.yaml"
+
+        if not os.path.exists(path):
+            rospy.logwarn(f"Kalibreringsfil saknas: {path}")
             return None
-        for path in YOLO_MODEL_PATHS:      # Gå igenom alla möjliga modellvägar
-            #if os.path.exists(path):       # Om filen finns
-            try:
-                m = YOLO(path)         # Ladda modellen från filen
-                m(np.zeros((IMG_H, IMG_W, 3), dtype=np.uint8),   # Gör en testinferens för att värma upp modellen
-                    verbose=False, imgsz=YOLO_IMGSZ)
-                rospy.loginfo(f"YOLO laddad: {path}")
-                rospy.loginfo(f"Klasser: {list(m.names.values())}")
-                return m
-            except Exception as e:
-                rospy.logwarn(f"Kunde inte ladda {path}: {e}")
-        return None
 
+        try:
+            with open(path, 'r') as f:
+                data = yaml.safe_load(f)
 
-    def yolo_loop(self):
-        rate = rospy.Rate(12)
-        while not rospy.is_shutdown() and self._img_running:    # Kör tills ROS stängs ned eller flaggan sätts till False
-            with self._lock:                                     # Lås för trådsäker åtkomst
-                img = self._latest_img                            # Hämta senaste bild
+            if 'homography' not in data:
+                rospy.logwarn(f"Nyckel 'homography' saknas i {path}")
+                return None
 
-            if img is not None and self.camera_active and self.model is not None:
-                result = self.analyse(img)               # Kör bildanalysen
-                with self._lock:                          # Lås igen för att skriva resultatet säkert
-                    self._img_result = result
-            rate.sleep()   
+            H_list = data['homography']
+            if len(H_list) != 9:
+                rospy.logwarn(f"homography har {len(H_list)} värden, förväntade 9")
+                return None
 
-    def get_result(self):                           # Hjälpfunktion för att hämta senaste bildresultatet
-        with self._lock:                            # Lås för trådsäker läsning
-            return self._img_result                 # Returnera senaste sparade resultat
+            # reshape(3,3) ger rätt rad-major ordning direkt från YAML-listan
+            H = np.array(H_list, dtype=np.float64).reshape(3, 3)
+            rospy.loginfo(f"Homografi laddad från {path}")
+            return H
 
-    def analyse(self, image):                        # Bildanalys med YOLO
-
-        if image is None or self.model is None:
-            return False, 0.0, False, 0.0, 1.0, rospy.Time.now().to_sec()
-
-        height, width = image.shape[:2]              # Hämta bildens höjd och bredd
-        roi_bottom = int(height * ROI_BOTTOM_FRAC)   # Beräkna nedre ROI-gräns
-        timestamp  = rospy.Time.now().to_sec()
-
-        try:     # Kör YOLO-inferens på bilden med vald confidence och inferensstorlek.
-            results = self.model(image, verbose=False, conf=YOLO_CONF, imgsz=YOLO_IMGSZ)
         except Exception as e:
-            rospy.logwarn_throttle(5.0, f"YOLO-inferens fel: {e}")
-            return False, 0.0, False, 0.0, 1.0, timestamp
+            rospy.logerr(f"Fel vid läsning av homografi: {e}")
+            return None
 
-        best_box  = None       # Här lagras bästa bounding box.
-        best_area = 0.0        # Här lagras största area hittills.       
-
-        for box in results[0].boxes:    # Iterera över alla upptäckta bounding boxes i första resultatet.
-            if OBSTACLE_CLASSES is not None:    # Om klassfiltrering används:
-                cls_id   = int(box.cls[0])      # Hämta klass-ID för boxen
-                cls_name = self.class_names.get(cls_id, "")    # Översätt klass-ID till klassnamn.
-                if cls_name not in OBSTACLE_CLASSES:         # Hoppa över objekt som inte är intressanta hinder.
-                    continue
-
-            x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())    # Hämta boxens koordinater
-            cy   = (y1 + y2) // 2        # Beräkna center-y för boxen.
-            area = (x2 - x1) * (y2 - y1)    # Beräkna boxens area.
-
-            # Bara objekt i framåt-ROI
-            if cy < roi_bottom and area > best_area:     # Om objektet ligger inom ROI och är större än tidigare bästa
-                best_area = area
-                best_box  = (x1, y1, x2, y2)          # Spara denna box som bästa kandidat.
-
-        if best_box is None:                        # Om inget lämpligt objekt hittades
-            return False, 0.0, False, 0.0, 1.0, timestamp
-
-        x1, y1, x2, y2 = best_box          # Packa upp bästa boxen.
-        left_space  = x1                    # Fritt utrymme till vänster om hindret
-        right_space = width - x2            # Fritt utrymme till höger om hindret.
-        box_width   = x2 - x1             # Hindrets bredd i pixlar
-
-        rospy.loginfo(
-            f"YOLO: area={best_area:.0f} "
-            f"Vänster={left_space} Höger={right_space} "
-            f"box_w={box_width} img_w={width}"
-        )
-
-        if box_width > width * WALL_COVER_FRAC:          # Om hindret täcker för stor del av bilden
-            rospy.loginfo_throttle(2.0,
-                f"VÄGG (YOLO): box_w={box_width} > {width * WALL_COVER_FRAC:.0f}px")
-            return True, 0.0, True, 0.0, 1.0, timestamp
-
-    
-        if left_space > right_space:          # Om det finns mer plats på vänster sida
-            edge_pixel = x1    # vänster kant på hindret
-            turn_sign  = 1.0   # sväng vänster
-            rospy.loginfo("YOLO: mest plats VÄNSTER")
-        else:
-            edge_pixel = x2    # höger kant på hindret
-            turn_sign  = -1.0  # sväng höger
-            rospy.loginfo("YOLO: mest plats HÖGER")
-
-        pixel_offset_deg = (edge_pixel - width / 2.0) / (width / 2.0) * (CAMERA_HFOV / 2.0)          # Översätt pixelpositionen till vinkel i grader relativt bildcentrum.
-        angle_rad = math.radians(pixel_offset_deg)      # Omvandla vinkeln från grader till radianer.
-        angle_rad = max(-MAX_AVOID_ANGLE, min(MAX_AVOID_ANGLE, angle_rad))      # Begränsa vinkeln till max 25 grader
-        theta_avoid  = self.normalize_angle(self.current_theta + angle_rad)       # Målvinkel = nuvarande vinkel + undanmanövervinkeln
-        edge_angle_deg   = math.degrees(abs(angle_rad))      # Sparar absolutvinkeln i grader för senare avståndsberäkning
-
-        rospy.loginfo_throttle(3.0,
-            f"YOLO: theta_avoid={math.degrees(theta_avoid):.1f} grader"
-            f"kant={edge_angle_deg:.1f} grader sign={turn_sign:+.0f}")
-
-        return True, theta_avoid, False, edge_angle_deg, turn_sign, timestamp
-
+    def default_homography(self):
+        """
+        Fallback-homografi om kalibreringsfilen saknas.
+        Baserad på typiska Duckiebot-mått (kameran 10 cm över golvet, ungefär 15° nedåt).
+        """
+        src = np.float32([
+            [200, 180], [440, 180],
+            [560, 380], [ 80, 380]
+        ])
+        dst = np.float32([
+            [ 80,   0], [320,   0],
+            [320, BEV_H], [ 80, BEV_H]
+        ])
+        return cv2.getPerspectiveTransform(src, dst)
+        
     def callback_desired_theta (self, msg):
         if self.state == IDLE:               # Behåll originalvinkeln fryst under undvikande
             if self.theta_original is None:
-                rospy.loginfo(f"theta_original initierad: {math.degrees(msg.data):.1f}grader")    # Logga första gången theta_original sätts
-            self.theta_original= msg.data     # Spara önskad riktning som "ursprunglig" riktning
+                rospy.loginfo(f"theta_original initierad: {math.degrees(msg.data):.1f}grader")
+            self.theta_original= msg.data     # Under AVOIDING/RETURNING ska den INTE skrivas över — vi vill minnas vart vi skulle
 
     def callback_current_theta(self, msg):   # Tar emot robotens aktuella vinkel för PID-reglering
         self.current_theta = msg.data
         
     def callback_tof(self, msg):   #  Körs varje gång ToF-sensorn skickar ett nytt avstånd.
-        if msg.range < MIN_TOF_VALID or msg.range > 5.0:    # Ignorera orimliga avstånd
+        if msg.range < MIN_TOF_VALID or msg.range > 5.0:
             return
         
         self.tof_range = msg.range      # Sparar senaste avståndet
         self.tof_initialized = True
-        if msg.range < TOF_WALL_DIST and self.state != REVERSING:    # Om något är väldigt nära och vi inte redan backar
-            self.wall_detected = True
+        if msg.range < TOF_WALL_DIST and self.state != REVERSING:
+           # if not self.camera_active:          # kolla om kameran inte redan är aktiv
+            self.camera_active = True
             rospy.loginfo(f"TOF: Formål på {msg.range:.2f}m ----> aktivera kamera")
             return
         
-        if msg.range < TOF_THRESHOLD:         # Om hinder är närmare än tröskeln
+        if msg.range < TOF_THRESHOLD:
             if not self.camera_active:
-                self.camera_active = True      # Aktivera kamerabearbetningen
-        else:        # Om ToF inte längre ser något nära
-            if self.state == IDLE:         # Om avståndet är större än tröskeln
+                self.camera_active = True
+        else:
+            if self.state == IDLE:             # Om avståndet är större än tröskeln
                 rospy.loginfo(f"ToF: Vägen klar ({msg.range:.2f}m) ------> kamera inaktiv")
                 self.camera_active = False     # Inget hinder nära --> stäng av kamera-analys
                 self.obstacle_pub.publish(Bool(data=False))  
@@ -322,13 +246,11 @@ class ObstacleDetectionNode(DTROS):
         if not self.camera_active and self.state == IDLE:      # Hoppa över om kameran inte är aktiv
             return
         try: 
+            # Gör om den komprimerade bilden till OpenCV-format
             np_arr = np.frombuffer(msg.data, np.uint8)   # np.frombuffer = konverterar dess till en numpy-arry  (np.unit8= varje värde tolkas som ett tal 0-225)
-            raw = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)   # cv2.imdecode() tar numpy-arry och dekoder den till en riktig bild / cv2. IMREAD_COLOR = säger att bilden ska läsas som en färgbild
-            if raw is not None:
-                undistorted = cv2.remap(raw, self._map1, self._map2, cv2.INTER_LINEAR)       # Korrigerar linsdistorsion
-                with self._lock:
-                    self._latest_img = undistorted    # Sparar senaste undistorterande bild trådsäkert.
-                            
+            image = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)   # cv2.imdecode() tar numpy-arry och dekoder den till en riktig bild / cv2. IMREAD_COLOR = säger att bilden ska läsas som en färgbild
+            if image is not None:
+                self.latest_image = image
         except Exception as e:    # Om något går fel--> krascha inte, skriv ut ett felmeddelande istället
             rospy.logwarn(f"Kamerafel --------> INTE BRA : {e}")
 
@@ -349,17 +271,17 @@ class ObstacleDetectionNode(DTROS):
         self._integral = 0.0
         self._prev_error = 0.0
 
-    def pid_steer(self, target, dt):
+    def pid_steer(self, target, dt=0.1):
         if target is None or dt <= 0:
             return 0.0
         error = self.angle_error_to(target)
-        derivative = (error - self._prev_error) / dt      # Derivatterm = förändring i fel per tidssteg
+        derivative = (error - self._prev_error) / dt
         self._prev_error = error
 
-        self._integral  = max(-3.0, min(3.0, self._integral + error * dt))     # Uppdatera integraldel men begränsa den för att undvika windup
+        self._integral  = max(-3.0, min(3.0, self._integral + error * dt))
         omega = KP_THETA * error + KI_THETA * self._integral + KD_THETA * derivative
         omega = max(-OMEGA_MAX, min(OMEGA_MAX, omega))
-        return omega         # Returnera PID-signal begränsad till max vinkelhastighet
+        return omega
 
     def rotate_to(self, target, dt):        # Roterar mot en given vinkel
         if target is None:
@@ -369,10 +291,11 @@ class ObstacleDetectionNode(DTROS):
             self.stop()
             rospy.loginfo(f"Nu ska jag rotera mot given vinkel :::)))")
             return True
+
         self.twist_pub.publish(Twist2DStamped(v=0.0, omega=self.pid_steer(target, dt)))   # Roterar på plats
         return False
     
-    def start_reversing(self):     # Gemensam funktion för att starta backning
+    def start_reversing(self):
         self.stop()
         self.reverse_start= rospy.Time.now().to_sec()
         self.reset_pid()
@@ -387,7 +310,7 @@ class ObstacleDetectionNode(DTROS):
         a = min(max(tof_dist, 0.05), MAX_TOF_FOR_DISTANCE) # a = avstånd till hinder (begränsat till MAX_TOF_FOR_DISTANCE)
         b = a * math.tan(math.radians(min(abs(edge_angle_deg), 89.0)))   # Begränsa vinkel till < 89° (tan(90) = oändligt)
         c = math.sqrt(a**2 + b**2) + 0.10   #  10 cm exgtra 
-        result = max(MIN_AVOID_DISTANCE, min(MAX_AVOID_DISTANCE, c))   # Begränsa resulterande körsträcka mellan min och max
+        result = max(MIN_AVOID_DISTANCE, min(MAX_AVOID_DISTANCE, c))
         rospy.loginfo(
             f"Pythagoras: a={a:.2f}m | b={b:.2f}m | "
             f"c={c:.2f}m --->> kör {result:.2f}m"
@@ -402,10 +325,120 @@ class ObstacleDetectionNode(DTROS):
             self.camera_active = False
             self.wall_detected = False
             self.obstacle_pub.publish(Bool(data=False))
-            self.state = IDLE
+            self.state            = IDLE
             self.state_entry_time = now
             return True
         return False
+    
+    def _undistort(self, image):  # Rättar linsförvrängning med förberäknad pixelkarta.
+        return cv2.remap(image, self._map1, self._map2, cv2.INTER_LINEAR)
+
+    def to_bev (self, image):
+       #  Transformerar kamerabild till Bird's Eye View (ovanifrån).
+        try:
+            undistorted = self._undistort(image)
+            return cv2.warpPerspective(undistorted, self.M, (BEV_W, BEV_H))
+        except Exception as e:
+            rospy.logerr_throttle(3.0, f"BEV misslyckades: {e}")
+            return cv2.resize(image, (BEV_W, BEV_H))
+        
+    def remove_floor(self, bev_gray):  #       Tar bort golvets textur med adaptiv tröskling.
+        mask = cv2.adaptiveThreshold(      #  # Adaptiv tröskling - jämför varje pixel med lokalt medelvärde
+            bev_gray, 255,
+            cv2.ADAPTIVE_THRESH_MEAN_C,
+            cv2.THRESH_BINARY,
+            blockSize=51,  # Stort grannskap = ignorerar globala ljusvariationer
+            C=10           # Subtrahera 10 från medelvärdet
+        )
+
+        # Morfologisk öppning = ta bort små bruspunkter
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+        return cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+  
+    
+
+    def analys_image (self, image):   # analysera  komerabild för att bekräfta föremål. 
+        if image is None:   #Returnerar: (found, theta_avoid, is_wall, edge_angle_deg, turn_sign)
+            return False, 0.0  , False , 0.0 , 1.0
+
+        # --- Steg 1: Bird's Eye View 
+        bev = self.to_bev(image)   
+         # -- Steg 2: Förbearbeta bilden 
+        gray = cv2.cvtColor(bev, cv2.COLOR_BGR2GRAY)   # Gör bilden gråskalig/ COLOR_BGR2GRAY konverterar bilden från BEG TO GRAY / cv2.cvtColor --> ändra färgeformat på en bild 
+        blurred = cv2.GaussianBlur(gray, (5, 5), 0)  # Suddar lite för att minska brus/(5, 5)  lagom blur vi har 0 då vi låter opencv välja bästa styrkan auto
+        
+        # -- Steg 3: Ta bort golvet 
+        floor_removed = self.remove_floor(blurred)       
+        edges = cv2.Canny(floor_removed, 30, 100)        # Hittar kanter i bilden,  <50 → ignorera, 50–150 → kanske viktigt, 150 → definitivt viktig / (50-150) --> ta bara tydliga kanter, men tillåt lite svagare kant
+        contours, _  = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)  # hittar kanter i bilden
+        '''cv2.findContours()--> tar en edge-bild, hittar alla objekt, returnerar deras former
+        cv2.RETR_EXTERNAL --> tar bara yttersta konturer/ cv2.CHAIN_APPROX_SIMPLE--> spara bara vikiga punker'''   
+        height, width = bev.shape[:2]
+        center_x = width // 2
+        roi_bottom = int(height * 0.7)  # Bara övre 70% = framåt
+        best_contour = None       
+        best_area = 0
+
+        for contour in contours:   
+            area = cv2.contourArea(contour)   # Storlek på objektet
+            if area < MIN_CONTOUR_AREA: # Ignorera små konturer (brus)
+                continue
+
+            # Hämtar en rektangel runt konturen
+            x , y,w,h = cv2.boundingRect(contour)    # Lätt att hitta mitten av objektet
+         #   contour_center_x = x + w // 2      # konturens mittpunkt x
+            contour_center_y = y + h // 2      # konturens mittpunkt y
+            
+            # Kriterier: i framåt-zonen, inom 40% från mitten, störst area
+            if contour_center_y < roi_bottom and area > best_area:
+                best_area = area
+                best_contour = contour            
+
+        if best_contour is None:   # Inga hinder hittades i mittzon
+
+            return False, 0.0 , False , 0.0 , 1.0
+        
+         # Beräkna hur mycket utrymme som finns på var sida om hindret
+        x , y,w,h = cv2.boundingRect(best_contour)
+        left_space = x                  # plats från föremålet till vänster kant
+        right_space = width -(x+w)       # plats från föremålet till höger kant
+        rospy.loginfo(
+            f"Foremål hittad: area={best_area:.0f}  "
+            f"plats vänster={left_space}  höger={right_space}"
+        )
+        # Sväng mot den sida som har mest plats
+        if left_space < WALL_THRESHOLD and right_space < WALL_THRESHOLD:
+            rospy.loginfo_throttle(2.0, f"VÄGG från kamera bild  |  vänster={left_space} | höger={right_space} --> backar")
+            return True, 0.0, True, 0.0 , 1.0
+        
+        if left_space > right_space:
+            edge_pixel = x
+            side_text = "VÄNSTAR"
+            turn_sign = 1.0
+            rospy.loginfo("Mest plats på VÄNSTAR --->>> svänger vänstar")
+        else:
+            edge_pixel = x + w   # hindrets högra kant
+            side_text = "HÖGER"
+            turn_sign = -1.0     # negativ omega = höger
+            rospy.loginfo("Mest plats på HÖGER --->>> svänger höger")
+        
+        pixel_offset = (edge_pixel- width/2.0) /(width/2.0) * (CAMERA_HFOV /2)  # Pixel till vinkel
+       # angle_error = max(-MAX_AVOID_ANGLE, min(MAX_AVOID_ANGLE, math.radians(pixel_offset)))    # Begränsa vinkel
+        angle_error = math.radians(max(-30.0, min(30.0, pixel_offset)))
+
+        theta_avoid = self.normalize_angle(self.current_theta + angle_error)       # Beräkna undvikande riktning
+        edge_angle_deg = math.degrees(abs(angle_error))  #Konverterar vinkeln från radianer till grader och gör den positiv.
+
+
+        rospy.loginfo_throttle(
+            3.0,
+            f"Hinder | sida={side_text} | vänster={left_space}px | "
+            f"höger={right_space}px | theta_avoid={math.degrees(theta_avoid):.1f}| "
+            f"kant-vinkel={edge_angle_deg:.1f}grader"
+        )
+
+
+        return True, theta_avoid, False, edge_angle_deg , turn_sign
     
     def run(self):
         rate = rospy.Rate(20)
@@ -413,17 +446,12 @@ class ObstacleDetectionNode(DTROS):
 
         while not rospy.is_shutdown():
             now = rospy.Time.now().to_sec()    # Hämtar nuvarande ROS-tid i sekunder
-            dt  = max(0.001, min(0.1, now - last_time))      # Beräkna tidssteg, begränsat mellan 0.001 och 0.1 s
+            dt  = max(0.001, min(0.1, now - last_time))
             last_time = now
-            
-            found, theta_img, is_wall, edge_deg, turn_sign, img_ts = self.get_result()    # Hämta senaste YOLO-resultat från bildtråden.
-            result_age = max(0.0, now - img_ts)     # Hur gammalt bildresultatet är
-            if result_age > 0.5:    # Ignorera för gamla bildresultat
-                found = False            
-            
-            if self.check_state_timeout(now):    # Om timeout inträffade, hoppa till nästa loopvarv
+
+            if self.check_state_timeout(now):
                 rate.sleep()
-                continue
+                continue     
 
             if self.wall_detected and self.state != REVERSING:
                 rospy.logwarn(f"wall_detected=True i [{self.state}] --->>> backar")
@@ -433,46 +461,52 @@ class ObstacleDetectionNode(DTROS):
                 continue
 
             if self.theta_original is None:
-                rate.sleep()         # Vänta tills theta_original har initierats
-                continue   
+                rate.sleep()
+                continue
 
             if self.state ==IDLE:   # IDLE--->> väntar på hinder
-                if self.camera_active and self._latest_img is not None:  # Om kamera är aktiv och bild finns
+                if self.camera_active and  self.latest_image is not None :  # Om kamera är aktiv och bild finns
                     self.obstacle_pub.publish(Bool(data=True))    # Publicera att hinder finns
                     self.stop()
                     self.scan_results= []     # Töm gamla scanresultat
                     self.scan_start = now     # Spara scan-starttid
                     self.state = SCANNING
-                    self.state_entry_time = now     # Spara tillståndstid
+                    self.state_entry_time = now
                     rospy.loginfo(f"IDLE--->SCANNING | theta_orig={math.degrees(self.theta_original):.1f}")
             
             elif self.state== SCANNING:
                 self.stop()
-                if found and is_wall:
-                    rospy.loginfo("SCANNING --> REVERSING (vägg via BEV-kamera)")
-                    self.start_reversing()
-                    rate.sleep()
-                    continue     # Vänta och hoppa till nästa loop
-                if found:
-                    safe_tof = min(self.tof_range if self.tof_initialized else TOF_THRESHOLD, MAX_TOF_FOR_DISTANCE)
-                    self.scan_results.append((theta_img, edge_deg, safe_tof, turn_sign))     # Spara undvikande vinkel
-        
+                if self.latest_image is not None:     # Om vägg upptäcks
+                    found, theta, is_wall, edge_deg, turn_sign = self.analys_image(self.latest_image)             
+                    
+                    if found and is_wall:
+                        rospy.loginfo("SCANNING --> REVERSING (vägg via BEV-kamera)")
+                        self.start_reversing()
+                        rate.sleep(); continue     # Vänta och hoppa till nästa loop
+                    if found:
+                        safe_tof = min(self.tof_range if self.tof_initialized else TOF_THRESHOLD, MAX_TOF_FOR_DISTANCE)
+                        self.scan_results.append((theta, edge_deg, safe_tof, turn_sign))     # Spara undvikande vinkel
+            
                 ready = len(self.scan_results) >= SCAN_FRAMES     # Kolla om tillräckligt många bilder samlats
                 timeout = (now -self.scan_start) >= SCAN_TIMEOUT   # Kolla om tiden tagit slut
 
                 if ready or (timeout and self.scan_results):       # Om redo eller timeout med resultat
                     thetas    = [r[0] for r in self.scan_results]  # Plockar ut ALLA första värden (theta-vinklar)
-                    edges = [r[1] for r in self.scan_results]  #  Plockar ut ALLA andra värden (kantvinklar i grader)
-                    tofs  = [r[2] for r in self.scan_results]  # Plockar ut ALLA tredje värden (ToF-avstånd)
-                    signs = [r[3] for r in self.scan_results]    # Samla alla svängtecken
+                    edge_degs = [r[1] for r in self.scan_results]  #  Plockar ut ALLA andra värden (kantvinklar i grader)
+                    tof_vals  = [r[2] for r in self.scan_results]  # Plockar ut ALLA tredje värden (ToF-avstånd)
+                    turn_signs = [r[3] for r in self.scan_results]
                     
                     self.theta_avoid = float(np.median(thetas))      # Ta median av vinklarna
-                    self.avoid_turn_sign = 1.0 if sum(signs) >= 0 else -1.0       # Välj övergripande svängriktning via majoritet.
-                    self.avoid_distance  = self.compute_avoid_distance(float(np.median(tofs)), float(np.median(edges)))       # Beräkna undanmanöversträckan med medianvärden.
-                    self.theta_at_rotation_start = self.current_theta         # Spara startvinkel innan rotation
+                    median_egde_deg = float(np.median(edge_degs)) 
+                    median_tof = float(np.median(tof_vals))  
+                    # Majoritetsbeslut: om fler bilder pekade åt vänster → vänster
+                    self.avoid_turn_sign = 1.0 if sum(turn_signs) >= 0 else -1.0
+                    
+                    self.avoid_distance = self.compute_avoid_distance(median_tof, median_egde_deg)  # # Beräkna körsträcka och spara startvinkel
+                    self.theta_at_rotation_start = self.current_theta
                     self.distance_driven = 0.0
                     self.reset_pid()
-                    self.state = ROTATING
+                    self.state= ROTATING
                     self.state_entry_time = now
                     rospy.loginfo(f"SCANNING --> ROTATING |"
                     f"theta_avoid={math.degrees(self.theta_avoid):.1f} | "
@@ -484,19 +518,20 @@ class ObstacleDetectionNode(DTROS):
                     self.fallback_scan_start_theta = self.current_theta
                     self.fallback_scan_dir = -1.0  # Börja med att rotera åt höger
                     self.fallback_total_rotated = 0.0
-                    self.fallback_rotated_per_dir = 0.0
                     self.fallback_prev_theta = self.current_theta
                     self.reset_pid()
                     self.state=SCAN_FALLBACK
                     self.state_entry_time = now
 
             elif self.state ==SCAN_FALLBACK:
-                delta = min(abs(self.normalize_angle(self.current_theta - self.fallback_prev_theta)), math.radians(10))  #Beräkna ungefär hur mycket roboten roterat sedan senaste varv, max 10 grader  per steg
-                self.fallback_total_rotated += delta     # Uppdatera total fallback-rotation
-                self.fallback_rotated_per_dir += delta    # Uppdatera rotation i nuvarande riktning
+                delta = abs(self.normalize_angle(self.current_theta - self.fallback_prev_theta))
+                delta= min(delta, math.radians(10))  # max 10° per tick
+
+                self.fallback_total_rotated += delta
+                self.fallback_rotated_per_dir += delta
                 self.fallback_prev_theta     = self.current_theta
             
-                if self.tof_range > TOF_CLEAR_DIST:   # Om ToF nu visar fri väg
+                if self.tof_range > TOF_CLEAR_DIST:
                     self.theta_avoid = self.current_theta
                     self.fallback_drive_distance = 0.0
                     self.reset_pid()
@@ -506,7 +541,7 @@ class ObstacleDetectionNode(DTROS):
                         f"SCAN_FALLBACK -->FB_DRIVING  |"
                         F" Riktning 0 {math.degrees(self.theta_avoid):.1f}"
                     )
-                elif (self.fallback_rotated_per_dir >= FALLBACK_MAX_PER_DIR and self.fallback_scan_dir == -1.0):   #  prova vänster
+                elif self.fallback_rotated_per_dir >= FALLBACK_MAX_PER_DIR and self.fallback_scan_dir == -1.0:   #  prova vänster
                     # Inget åt höger - prova vänster istället
                     rospy.logwarn("SCAN_FALLBACK: ingen  år höger -> provar vänstar")
                     self.fallback_scan_dir = 1.0
@@ -542,20 +577,25 @@ class ObstacleDetectionNode(DTROS):
                         f"FB_DRIVING -->> RETURNING | "
                         f"kört={self.fallback_drive_distance:.2f}m"
                     )
-                elif self.tof_range < TOF_WALL_DIST:
-                    rospy.loginfo("FB_DRIVING:   VÄGG---->> REVERSING")
-                    self.start_reversing()
                 else:
-                    self.twist_pub.publish(Twist2DStamped(v=AVOID_VELOCITY, omega=self.pid_steer(self.theta_avoid, dt)))
-                    rospy.loginfo_throttle(
-                        2.0,
-                        f"FB_DRIVING | {self.fallback_drive_distance:.2f}/{FALLBACK_DRIVE:.2f}m"
-                    )
+                    if self.tof_range < TOF_WALL_DIST:
+                        rospy.loginfo("FB_DRIVING:   VÄGG---->> REVERSING")
+                        self.start_reversing()
+                    else:
+                        omega = self.pid_steer(self.theta_avoid)
+                        self.twist_pub.publish(Twist2DStamped(v=AVOID_VELOCITY, omega=omega))
+                        rospy.loginfo_throttle(
+                            2.0,
+                            f"FB_DRIVING | {self.fallback_drive_distance:.2f}/{FALLBACK_DRIVE:.2f}m"
+                        )
 
             elif self.state == ROTATING:        # Om tillstånd är ROTATING
                 if self.rotate_to(self.theta_avoid, dt):
-                    self.total_rotation_done = self.normalize_angle(self.current_theta - self.theta_at_rotation_start)   # Räkna hur mycket bilen faktiskt roterat
-                    still_blocked = found and (result_age < 0.3) and self.tof_range < TOF_THRESHOLD     # Kolla om hindret fortfarande verkar vara kvar framför bilen
+                    self.total_rotation_done = self.normalize_angle(self.current_theta - self.theta_at_rotation_start)
+                    still_blocked = False
+                    if self.latest_image is not None and self.tof_range < TOF_THRESHOLD:
+                        found, _, _, _, _ = self.analys_image(self.latest_image)
+                        still_blocked = found
                     if still_blocked:
                         self.theta_avoid = self.normalize_angle(self.theta_avoid + self.avoid_turn_sign * ROTATING_EXTRA_STEP)
                         rospy.loginfo(
@@ -568,7 +608,6 @@ class ObstacleDetectionNode(DTROS):
                         self.avoid_start_time = now
                         self.reset_pid()
                         self.state = AVOIDING
-                        self.state_entry_time = now
                         rospy.loginfo(
                             f"ROTATING -> AVOIDING | "
                             f"roterat={math.degrees(self.total_rotation_done):.1f}grader | "
@@ -580,7 +619,7 @@ class ObstacleDetectionNode(DTROS):
                         f"ROTATING | fel={math.degrees(self.angle_error_to(self.theta_avoid)):.1f}grader"
                     )
             elif self.state == AVOIDING:
-                if (now - self.avoid_start_time) > MAX_AVOID_TIME:      # Om undanmanövern tagit för lång tid
+                if (now - self.avoid_start_time) > MAX_AVOID_TIME:
                     rospy.logwarn("AVOIDING timeout → RETURNING")
                     self.stop()
                     self.reset_pid()
@@ -593,23 +632,24 @@ class ObstacleDetectionNode(DTROS):
                     self.state = RETURNING
                     self.state_entry_time = now
                     rospy.loginfo(f"AVOIDING -->>> RETURNING |"
-                        f"kört={self.distance_driven:.2f}/{self.avoid_distance:.2f}m"
+                                 f"kört={self.distance_driven:.2f}/{self.avoid_distance:.2f}m"
                     )
-               
-                elif self.tof_range < TOF_WALL_DIST:
-                    rospy.loginfo("AVOIDING: vägg → REVERSING")
-                    self.start_reversing()
                 else:
-                    omega = self.pid_steer(self.theta_avoid,dt)
-                    self.twist_pub.publish(Twist2DStamped(v=AVOID_VELOCITY, omega=omega))
-                    self.distance_driven += AVOID_VELOCITY * dt # Uppdatera hur långt vi kört (tid * hastighet)
-                    rospy.loginfo_throttle(2.0,
-                        f"AVOIDING | "
-                        f"{self.distance_driven:.2f}/{self.avoid_distance:.2f}m | "
-                        f"omega={omega:.2f}"
-                    )
+
+                    if self.tof_range < TOF_WALL_DIST:
+                        rospy.loginfo("AVOIDING: vägg → REVERSING")
+                        self.start_reversing()
+                    else:
+                        omega = self.pid_steer(self.theta_avoid)
+                        self.twist_pub.publish(Twist2DStamped(v=AVOID_VELOCITY, omega=omega))
+                        self.distance_driven += AVOID_VELOCITY * dt # Uppdatera hur långt vi kört (tid * hastighet)
+                        rospy.loginfo_throttle(2.0,
+                            f"AVOIDING | "
+                            f"{self.distance_driven:.2f}/{self.avoid_distance:.2f}m | "
+                            f"omega={omega:.2f}"
+                        )
             elif self.state == REVERSING:
-                elapsed = now - self.reverse_start      # Hur länge vi har backat
+                elapsed = now - self.reverse_start
                 if elapsed < REVERSE_DURATION:
                     self.twist_pub.publish(Twist2DStamped(v=-REVERSE_SPEED, omega=0.0))
                     rospy.loginfo_throttle(
@@ -625,15 +665,16 @@ class ObstacleDetectionNode(DTROS):
                     rospy.loginfo("REVERSING -->>>> SCANNING")
 
             elif self.state == RETURNING:
-                if self.tof_range < TOF_THRESHOLD and found and result_age < 0.3:    # Om nytt hinder dyker upp på vägen tillbaka
-                    self.scan_results = []
-                    self.scan_start = now
-                    self.stop()
-                    self.state = SCANNING
-                    self.state_entry_time = now
-                    rospy.loginfo("RETURNING -> SCANNING (nytt hinder)")
-                    rate.sleep()
-                    continue
+                if self.tof_range < TOF_THRESHOLD and self.latest_image is not None:
+                    found, _, _, _, _ = self.analys_image(self.latest_image)
+                    if found:
+                        self.scan_results = []
+                        self.scan_start = now
+                        self.stop()
+                        self.state = SCANNING
+                        self.state_entry_time = now
+                        rospy.loginfo("RETURNING -> SCANNING (nytt hinder)")
+                        rate.sleep();continue
                     
                 if self.rotate_to(self.theta_original,dt):
                     self.obstacle_pub.publish(Bool(data=False))
@@ -652,7 +693,6 @@ class ObstacleDetectionNode(DTROS):
             
     def on_shutdown(self):
         rospy.loginfo("Stoppar ObstacleDetectionNode")
-        self._img_running = False
         try:
             for _ in range(5):
                 self.twist_pub.publish(Twist2DStamped(v=0.0, omega=0.0))
