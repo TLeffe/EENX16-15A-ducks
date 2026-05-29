@@ -28,9 +28,7 @@ TICKS_PER_REV = 135                       # Encoder-ticks per varv på hjulen
 # PID-regulator för styrning 
 # ============================
 Accepted_angle = math.radians(10)         # [rad] Max tillåtet vinkelfel för rak körning
-KP_THETA = 8                              # Proportionell del- hur aggressivt roboten styr mot önskad vinkel
-KI_THETA =  0.2                           # Integraldel- kompenserar för konstant drift
-KD_THETA= 0                               # Derivatdel - dämpning av snabb vinkeländring
+
 OMEGA_MAX = 0.5                           # [rad/sec] Max vridningshastighet för säkerhet
 
 # ============================
@@ -62,14 +60,24 @@ class TwistControlNode(DTROS):
         self.obstacle_topic      = f"/{self.vehicle_name}/obstacle_detection_node/obstacle_detected"
         
         # Olika robotar har olika motoregenskaper och kräver individuell inställning.
-        if self.vehicle_name == 'duck4':
-            KP_THETA = 22
-            KI_THETA = 0.01
-            KD_THETA = 0.1
-        elif self.vehicle_name == 'duck3':
-            KP_THETA = 22
-            KI_THETA = 0.1
-            KD_THETA = 0.2
+        self.KP_THETA = 1                              # Proportionell del- hur aggressivt roboten styr mot önskad vinkel
+        self.KI_THETA = 1                           # Integraldel- kompenserar för konstant drift
+        self.KD_THETA= 1                               # Derivatdel - dämpning av snabb vinkeländring
+        # här stoppar ni in era beräknade PID parametrar för varje individuell robot
+        if self.vehicle_name == 'placeholdername1':
+            self.KP_THETA = 0
+            self.KI_THETA = 0
+            self.KD_THETA = 0
+        elif self.vehicle_name == 'placeholdername2':
+            self.KP_THETA = 0
+            self.KI_THETA = 0
+            self.KD_THETA = 0
+        elif self.vehicle_name == 'placeholdername3':
+            self.KP_THETA = 0
+            self.KI_THETA = 0
+            self.KD_THETA = 0
+        else:
+            pass
 
         # Instruktionshantering
         self.instruction = ""                 # Senast mottagen instruktionssträng
@@ -189,7 +197,7 @@ class TwistControlNode(DTROS):
         self._ticks_right = data.data
    
     def _publish_cmd(self, v, omega):      
-       """Publicerar ett körkommando till drivnoden."""
+       """Publicerar ett körkommando till drivtopic."""
        self._publisher.publish(Twist2DStamped(v=v, omega=omega))       
 
     def normalize_angle(self,angle): 
@@ -224,13 +232,13 @@ class TwistControlNode(DTROS):
         Returns:
             float: Begränsad vinkelhastighet [rad/s].
         """
-        self._derivatan = KD_THETA * (theta_error-self._prev_theta_error)/dt
+        self._derivatan = self.KD_THETA * (theta_error-self._prev_theta_error)/dt
         self._prev_theta_error = theta_error
 
         self._theta_error_integral += theta_error * dt 
         self._theta_error_integral = max(-5.0, min(5.0, self._theta_error_integral))
 
-        omega = KP_THETA * theta_error + KI_THETA * self._theta_error_integral + self._derivatan
+        omega = self.KP_THETA * theta_error + self.KI_THETA * self._theta_error_integral + self._derivatan
         omega = max(-OMEGA_MAX, min(OMEGA_MAX, omega)) 
         return omega
 
@@ -243,7 +251,7 @@ class TwistControlNode(DTROS):
             tuple: (prev_ticks_left, prev_ticks_right) uppdaterade enkodervärden.
         """
         rospy.loginfo(
-            f"Vinkelfel > 20 grader -> roterar pa plats "
+            f"Vinkelfel > {math.degrees(Accepted_angle)}grader -> roterar pa plats "
             f"Nuvarande: {math.degrees(self._position[2]):.1f} grader"
             f"Önskar: {math.degrees(self.DESIRED_THETA):.1f} grader"
         )
@@ -314,7 +322,7 @@ class TwistControlNode(DTROS):
         d =  (dl + dr) / 2.0                       # Framåtförflyttning [m]       
         dtheta_enc = (dr - dl) / AXIS_LENGTH       # Rotationsuppskattning från enkodrar [rad]
         
-        # Fusionera enkoder och gyro för robustare rotationsuppskattning
+        # Fusionera enkoder och gyro för rotationsuppskattning
         alpha = 0.85
         gyro_dtheta = (self.latest_imu_gyro_z-self.gyro_bias)*dt
         fused_dtheta = alpha *gyro_dtheta + (1-alpha) * dtheta_enc 

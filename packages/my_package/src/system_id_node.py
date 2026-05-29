@@ -20,10 +20,8 @@ Accepted_angle = math.radians(30)
 # -------------------------------------------------------
 # PI-regulator för styrning 
 # -------------------------------------------------------
-KP_THETA = 0               # proportionell — hur hårt vi styr mot rätt riktning
-KI_THETA =  0          # integral — kompenserar konstant drift
-OMEGA_MAX = 4.0              # max vridningshastighet (säkerhetsgräns)
-KD_THETA= 0
+
+OMEGA_MAX = 4.0              # max vridningshastighet (säkerhetsgräns
 GOAL_THRESHOLD = 0.05       # 5 cm — mål nått
 BASE_SPEED =  0.3
 class TwistControlNode(DTROS):
@@ -82,9 +80,6 @@ class TwistControlNode(DTROS):
     def callback_imu(self, data):
         self.latest_imu_gyro_z = data.angular_velocity.z - self.gyro_bias
 
-    def callback_comm(self,msg):
-        self.instruction = msg.data
-        rospy.loginfo(f"recieved instructions:{self.instruction}")
     def calibrate_gyro(self, duration=2.0):
         rospy.loginfo("Starting Gyro Calibration...")
         
@@ -104,19 +99,6 @@ class TwistControlNode(DTROS):
         else:
             rospy.logwarn("Calibration failed: No IMU samples received.") 
 
-
-    def instruction_parse(self):  # tar hand om inkommande instruktioner, ska vara string på formen self.vehicle_name,x,y,theta,x1,y1,x2,y2 
-        while not rospy.is_shutdown():
-            if self.instruction != self.prev_instructions:
-                self.prev_instructions = self.instruction
-                self.current_order_list = self.prev_instructions.split(",") # gör om instruktionerna till en lista. 
-                del self.current_order_list[0] # ta bort namnet på roboten
-                self.current_order_list = [float(i) for i in self.current_order_list]
-                self._position[0:3] = self.current_order_list[0:3] #uppdatera postion och vinklar
-                self.goal_pose[0:2] = self.current_order_list[3:5]
-            else:
-                break # om inga nya instruktioner på topic, uppdatera inget
-
     def callback_left(self, data):
         self._ticks_left = data.data
 
@@ -125,118 +107,6 @@ class TwistControlNode(DTROS):
    
     def _publish_cmd(self, v, omega):       #  En hjälpfunktion som skickar körkommando till roboten
        self._publisher.publish(Twist2DStamped(v=v, omega=omega))       
-
-    def normalize_angle(self,angle):       #  Normalisera felet till intervallet [-pi, pi]
-        while angle > math.pi:   
-            angle -= 2 * math.pi
-
-        while angle < -math.pi:
-            angle += 2 * math.pi
-        return angle
-    
-    def reset_PID(self):             # nollställa PID, anropas denna fkt när roboten ska rotera
-        self._theta_error_integral = 0.0
-        self._prev_theta_error     = 0.0
-        
-    def check_angle_error(self):
-        theta_error = self.DESIRED_THETA - self._position[2]
-        return self.normalize_angle(theta_error)
-    
-    def PID_omega(self, theta_error,dt):
-        self._derivatan = KD_THETA * (theta_error-self._prev_theta_error)/dt
-        self._prev_theta_error = theta_error
-
-        self._theta_error_integral += theta_error * dt   # uppdatera integralen (I-delen)
-        self._theta_error_integral = max(-8.0, min(8.0, self._theta_error_integral))
-
-        omega = KP_THETA * theta_error + KI_THETA * self._theta_error_integral + self._derivatan
-        omega = max(-OMEGA_MAX, min(OMEGA_MAX, omega))     # roboten ska inte vrider sig för snabbt
-
-        return omega
-
-    
-    def rotation_to_correct(self, rate, dt, prev_ticks_left, prev_ticks_right):
-        rospy.loginfo(
-            f"Vinkelfel > 20 grader —>>> roterar pa plats "
-            f"Nuvarande: {math.degrees(self._position[2]):.1f} grader"
-            f"Önskar: {math.degrees(self.DESIRED_THETA):.1f} grader"
-        )
-        self.reset_PID()
-        while not rospy.is_shutdown():
-            self.instruction_parse()
-            prev_ticks_left, prev_ticks_right = self.update_odometry(
-                prev_ticks_left, prev_ticks_right
-            )
-            theta_error =  self.check_angle_error()
-            if abs(theta_error) < Accepted_angle:
-                rospy.loginfo(f"Vinkle OK!  fel={math.degrees(theta_error):1f} grader")
-                break
-            
-            omega = self.PID_omega(theta_error, dt)
-            self._publish_cmd (v=0.0, omega=omega)      # V = 0 stå still under rotation   
-
-            rospy.loginfo_throttle(
-                1, 
-                f"Roterar fel {math.degrees(theta_error):.1f} grader omega = {omega:.3f}"
-            )
-            rate.sleep()
-        self.reset_PID()
-        return prev_ticks_left, prev_ticks_right
-
-    def straight_forward(self, dt): 
-        #   kör framåt med PID mot önskade theta när vinkelfel < 20 grader.
-        theta_error = self.check_angle_error()  
-        omega = self.PID_omega(theta_error, dt)
-        self._publish_cmd(v=self.VELOCITY, omega= omega)
-
-    def Goal_reached(self):
-        """Returnera True om Roboten är inom 5 cm från målet"""
-        if self.goal_pose is None:
-            return False
-        dx = self.goal_pose[0] - self._position[0]
-        dy = self.goal_pose[1] - self._position[1]
-
-        return math.sqrt(dx**2 + dy**2) < GOAL_THRESHOLD
-
-    def update_odometry(self, prev_tick_left, prev_ticks_right):
-        current_time = rospy.get_time()
-        dt = current_time - self.senast_tid
-        if dt <= 0:
-            return self._ticks_left, self._ticks_right
-        dNl = self._ticks_left  - prev_tick_left
-        dNr = self._ticks_right - prev_ticks_right
-        dl = WHEEL_CIRC * (dNl / TICKS_PER_REV)   # vänster hjul i meter
-        dr = WHEEL_CIRC * (dNr / TICKS_PER_REV)   # höger hjul i meter
-        d =  (dl + dr) / 2.0                   # sträcka framåt
-        dtheta = (dr - dl) / AXIS_LENGTH       # svängning i radianer eller förändning i vinkel
-        self.calc_omega = dtheta/dt
-        ##filter, kommentera tillbaka om du vill använda både gyro och hjulen##
-        # alpha = 0.90 
-        # fused_dtheta = alpha * (self.latest_imu_gyro_z * dt) + (1 - alpha) * dtheta_enc     
-        # midpoint_theta  = self._position[2] + fused_dtheta/2.0
-        #------------------------------------------------------------------##
-        midpoint_theta  = self._position[2] + dtheta / 2.0
-        self._position[0] += d * math.cos(midpoint_theta)
-        self._position[1] += d * math.sin(midpoint_theta)
-        self._position[2]  = self.normalize_angle(self._position[2] + dtheta)   # Utan normalisering kan roboten få problem när man beräknar rotationsfel
-        self.unwrapped_theta += dtheta
-        self.senast_tid = current_time
-        return self._ticks_left, self._ticks_right
-
-    def calculate_desired_direction(self):
-
-        dx_g = self.goal_pose[0] - self._position[0]        # beräknar skillnaden mellan målet och nuvarande pos
-        dy_g = self.goal_pose[1] - self._position[1]
-
-        dist_goal = math.sqrt(dx_g**2 + dy_g**2)
-        
-        if dist_goal < 0.005:       # Om roboten redan är vid målet, avsluta funktionen
-            return
-        # self.DESIRED_THETA = math.atan2(dy_g, dx_g)     # Beräknar önskad vinkel (theta) mot målet
-        self.DESIRED_THETA = math.atan2(self.goal_pose[1] - self._position[1],self.goal_pose[0] - self._position[0]  )  
-        self.VELOCITY  = BASE_SPEED
- 
-
 
     def run(self):
         rate = rospy.Rate(40)
