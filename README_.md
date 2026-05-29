@@ -1,5 +1,5 @@
 
-### Noder
+### ROSNoder
 
 ### 1 Comm_node
 Har funktioner för att ta emot instruktioner via UDP på en specifik port via SOCKET, motsvarande sändare finns i  ros2_ws/src/ducks/ducks/duck_control_node.py.
@@ -16,7 +16,7 @@ på detta format
 Vi rekomenderar framtida projekt att använde en 2 vägs kommunikation av mågot slag, om möjligt ROS2 brygga. 
 
 ### 2 system_id_node
-Användes för systemidentifiering av robotarna, dessa kör i en S-kurva och loggar tidsstämpel, önskad vinkelhastighet, rotation kring z, beräknad vinkelhastighet, rå vinkelhastighet från IMU. Detta sparas i en CSV som enkelt heter CSV
+Användes för systemidentifiering av robotarna, dessa kör i en S-kurva och loggar tidsstämpel, önskad vinkelhastighet, rotation kring z, beräknad vinkelhastighet, rå vinkelhastighet från IMU. Detta sparas i en CSV som enkelt heter data.
 
 Plocka ut data ni behöver om ni ska använda duckiebots, utför datainsamling på samma underlag som ni kommer köra på i slutändan.
 
@@ -28,9 +28,11 @@ Det finns många debugmeddelanden som kan kommenteras bort vid faktisk körning
 Uppdateringsfrekvenser över 25hz leder ofta till att avstängningskommandot inte exekveras korrekt och manuell handpåläggning för att stänga av krävs. Detta kringår avstängningsprocessen och vi misstänker detta är kan leda till korruption av data. 
 
 ### 4 obstacle_detection
+Hindredetektion användes för att undvika kollisioner. 
+lyssnar på information från obstacle_detection på /{self.vehicle_name}/obstacle_detection_node/obstacle_detected. De enskilda funktioner är förklarade i koden. 
+ToF-sensor fungerar utmärkt utan något problem, men bildanalysen behöver felsökans. 
 
 
-### 5 camerareader_node
 
 
 ### Att komma igång.
@@ -47,6 +49,8 @@ dts fleet discover
     för att kolla vilka robotar som har går att hitta på nätet.
 
 Viktigt att notera att du behöver vara på ett nätverk där det går att pinga/kommunicera obehindrat, med andra ord INTE eduroam, kontakta er handledare eller IT administrationen för att komma runt problemet. 
+
+Ni kommer att behöva implementera egen styrning, den som finns här kan ni se som ett ramverk att arbeta vidare ifrån. För den fungerar.
 
 ### vanliga Errors och lösningar
 Dessa är de vanligaste errors vi stött på, saker som att roboten slutar rotera och beter sig konstigt har inte behandlats här. Felsökningsguiden för duckiebots från duckietowns hemsida är också en bra plats att påbörja processen. 
